@@ -1006,6 +1006,8 @@ function send(res, code, obj) {
     res.end(body);
 }
 
+let cudaDevicesCache = null; // CUDA 设备枚举缓存（torch import 慢，成功后常驻）
+
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     const route = `${req.method} ${url.pathname}`;
@@ -1044,6 +1046,25 @@ const server = http.createServer(async (req, res) => {
                 }
                 send(res, 200, { devices, raw: out.trim(), error: err ? String(err) : null });
             });
+            return;
+        }
+
+        if (route === 'GET /api/cuda-devices') {
+            // CUDA 与 Vulkan 是两套独立编号空间（核显机上必然错位）：
+            // 旗舰引擎（PyTorch）的设备选择必须用这份 CUDA 枚举，不能复用上方 Vulkan 列表
+            if (cudaDevicesCache) return send(res, 200, cudaDevicesCache);
+            execFile(PYTHON_EXE, ['-c',
+                'import torch,json;print(json.dumps({"devices":[{"index":i,"name":torch.cuda.get_device_name(i)} for i in range(torch.cuda.device_count())]}))'],
+                // torch import 较慢（首次约 10s），成功后永久缓存；失败不缓存（环境可能未就绪）
+                { timeout: 120000 }, (err, stdout) => {
+                    if (!err) {
+                        try {
+                            cudaDevicesCache = JSON.parse(String(stdout).trim());
+                            return send(res, 200, cudaDevicesCache);
+                        } catch { /* fallthrough */ }
+                    }
+                    send(res, 200, { devices: [], error: err ? String(err).slice(0, 160) : 'CUDA 枚举失败' });
+                });
             return;
         }
 

@@ -71,6 +71,24 @@ def resolve_device(raw):
     return s if ':' in s else 'cuda:0'
 
 
+def validate_cuda_device(device):
+    """CUDA 索引合法性校验：畸形/越界时给中文明确错误，而非原始 CUDA 报错。
+
+    注意 CUDA 与 Vulkan 是两套独立编号空间（核显机上必然错位），
+    索引越界是多卡/核显机上最容易踩的坑。"""
+    if not device.startswith('cuda:'):
+        return
+    import torch
+    try:
+        idx = int(device.split(':', 1)[1])
+    except ValueError:
+        fail(f'无法识别的 CUDA 设备：{device!r}（应为 cuda:0、cuda:1 等形式）')
+    n = torch.cuda.device_count()
+    if idx >= n:
+        fail(f'本机只有 {n} 张 CUDA 卡（cuda:0 ~ cuda:{n - 1}），无法使用 {device}；'
+             '请在高级选项的 CUDA 设备中选择有效的显卡')
+
+
 def start_decode_watchdog(dec_proc, warn_after=60, kill_after=300, suspend_flag=None,
                           enc_proc=None):
     """管道心跳看门狗。
@@ -260,6 +278,7 @@ def main():
     if use_cuda:
         # empty_cache() / autocast('cuda') 等都作用于"当前设备"（默认 0 号卡）：
         # 不调用 set_device，多卡下显存回收与 autocast 上下文全部落错卡
+        validate_cuda_device(device)  # 索引越界给中文提示，而非原始 CUDA 报错
         torch.cuda.set_device(device)
     fp16 = use_cuda and not args.no_fp16
     model = load_realbasicvsr(

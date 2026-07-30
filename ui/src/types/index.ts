@@ -58,7 +58,10 @@ export interface EncoderConfig {
 }
 
 export interface AdvancedConfig {
+    /** ncnn CLI 的 Vulkan 设备序号（video2x.exe -l 枚举） */
     deviceIndex: number;
+    /** 旗舰引擎（PyTorch）的 CUDA 设备序号：与 Vulkan 编号空间相互独立 */
+    cudaDeviceIndex: number;
     hwaccel: string;
     benchmark: boolean;
     logLevel: string;

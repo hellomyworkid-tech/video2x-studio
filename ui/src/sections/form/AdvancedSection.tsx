@@ -10,12 +10,44 @@ interface Props {
     req: JobRequest;
     onChange: (p: Partial<JobRequest>) => void;
     devices: GpuDevice[];
+    /** 旗舰引擎模式：devices 为 CUDA 枚举，仅暴露 CUDA 设备选择 */
+    python?: boolean;
     bare?: boolean;
 }
 
-export default function AdvancedSection({ req, onChange, devices, bare }: Props) {
+export default function AdvancedSection({ req, onChange, devices, python, bare }: Props) {
     const adv = req.advanced;
     const setAdv = (patch: Partial<typeof adv>) => onChange({ advanced: { ...adv, ...patch } });
+
+    if (python) {
+        // 旗舰引擎（PyTorch）：CUDA 与 Vulkan 是两套独立编号空间，
+        // 这里的序号只发给 worker.py --device，与 ncnn 的 Vulkan 序号互不影响
+        return (
+            <SectionCard step="05" title="高级" desc="旗舰引擎硬件调度" bare={bare}>
+                <div className="max-w-sm">
+                    <Label className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Cpu className="h-3 w-3" /> CUDA 设备（GPU）
+                    </Label>
+                    <Select value={String(adv.cudaDeviceIndex ?? 0)} onValueChange={(v) => setAdv({ cudaDeviceIndex: Number(v) })}>
+                        <SelectTrigger className="h-9 bg-input/60 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {devices.length === 0 && <SelectItem value="0" className="text-xs">cuda:0（默认）</SelectItem>}
+                            {devices.map((d) => (
+                                <SelectItem key={d.index} value={String(d.index)} className="text-xs">
+                                    cuda:{d.index} · {d.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
+                    {devices.length > 1
+                        ? `检测到 ${devices.length} 张 CUDA 显卡：旗舰引擎将完整在所选卡上推理。注意 CUDA 序号与 ncnn 的 Vulkan 序号是两套编号，各自独立选择。`
+                        : 'CUDA 设备即旗舰引擎执行推理的显卡，单卡机器保持默认即可。首次枚举约需 10 秒（加载 PyTorch），若列表为空请稍后重开本页。'}
+                </p>
+            </SectionCard>
+        );
+    }
 
     return (
         <SectionCard step="05" title="高级" desc="硬件调度与调试选项" bare={bare}>

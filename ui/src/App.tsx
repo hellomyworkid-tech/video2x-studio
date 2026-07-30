@@ -13,6 +13,7 @@ export default function App() {
     const [view, setView] = useState<ViewName>('queue');
     const [jobs, setJobs] = useState<Job[]>([]);
     const [devices, setDevices] = useState<GpuDevice[]>([]);
+    const [cudaDevices, setCudaDevices] = useState<GpuDevice[]>([]);
     const [cliReady, setCliReady] = useState<boolean | null>(null);
     const [pyEngine, setPyEngine] = useState<PythonEngineStatus | null>(null);
     const [assetState, setAssetState] = useState<AssetsState | null>(null);
@@ -29,6 +30,8 @@ export default function App() {
             })
             .catch(() => setCliReady(false));
         api.devices().then((d) => setDevices(d.devices)).catch(() => {});
+        // CUDA 枚举首次约 10s（torch import），后台异步填充，不阻塞界面
+        api.cudaDevices().then((d) => setCudaDevices(d.devices)).catch(() => {});
         api.assets().then(setAssetState).catch(() => {});
         // 全局拖放防护：拖到非投放区时阻止窗口直接打开文件
         const prevent = (e: DragEvent) => e.preventDefault();
@@ -69,6 +72,7 @@ export default function App() {
                         <NewJobView
                             key={newJobKey}
                             devices={devices}
+                            cudaDevices={cudaDevices}
                             cliReady={cliReady === true}
                             pyReady={pyReady}
                             onSubmitted={() => setView('queue')}

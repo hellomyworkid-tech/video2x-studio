@@ -17,8 +17,9 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
     const codec = enc.codec === 'custom' ? (enc.customCodec.trim() || 'libx264') : (enc.codec || 'libx264');
     const args = ['--model', p.kind, '-i', inputPath, '-o', outputPath,
         '--codec', codec, '--crf', String(enc.crf >= 0 ? enc.crf : 18),
-        // 旗舰引擎同样尊重高级选项里的显卡选择（worker.py --device → torch.device）
-        '--device', `cuda:${req.advanced.deviceIndex}`];
+        // 旗舰引擎用 CUDA 编号空间（不可复用 Vulkan 的 deviceIndex，核显机上会错位）；
+        // 旧持久化配置无此字段时回落 0
+        '--device', `cuda:${req.advanced.cudaDeviceIndex ?? 0}`];
     if (p.kind === 'flashvsr') {
         args.push('--segment', String(p.flashvsrSegment));
     }
@@ -159,6 +160,7 @@ export function defaultJobRequest(): JobRequest {
         },
         advanced: {
             deviceIndex: 0,
+            cudaDeviceIndex: 0,
             hwaccel: 'none',
             benchmark: false,
             logLevel: 'info',

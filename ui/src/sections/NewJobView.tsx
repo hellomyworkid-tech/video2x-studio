@@ -19,6 +19,8 @@ import AdvancedSection from '@/sections/form/AdvancedSection';
 
 interface Props {
     devices: GpuDevice[];
+    /** CUDA 编号空间的设备列表（旗舰引擎专用） */
+    cudaDevices: GpuDevice[];
     cliReady: boolean;
     pyReady: boolean;
     onSubmitted: () => void;
@@ -87,13 +89,16 @@ function summarizeConfig(req: JobRequest): string {
     const codec = req.encoder.codec === 'custom' ? req.encoder.customCodec : req.encoder.codec;
     parts.push(`编码：${codec}${req.encoder.crf >= 0 ? ` CRF${req.encoder.crf}` : ''}`);
 
-    const adv = [`设备${req.advanced.deviceIndex}`];
-    if (req.advanced.hwaccel && req.advanced.hwaccel !== 'none') adv.push(`硬解 ${req.advanced.hwaccel}`);
+    const isPy = engineFor(req.processor.kind) === 'python';
+    const adv = isPy
+        ? [`CUDA 设备${req.advanced.cudaDeviceIndex ?? 0}`]
+        : [`设备${req.advanced.deviceIndex}`];
+    if (!isPy && req.advanced.hwaccel && req.advanced.hwaccel !== 'none') adv.push(`硬解 ${req.advanced.hwaccel}`);
     parts.push(`高级：${adv.join(' · ')}`);
     return parts.join('　|　');
 }
 
-export default function NewJobView({ devices, cliReady, pyReady, onSubmitted, onCancel }: Props) {
+export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, onSubmitted, onCancel }: Props) {
     const [req, setReq] = useState<JobRequest>(() => loadSavedConfig() ?? defaultJobRequest());
     const [submitting, setSubmitting] = useState(false);
     const [prechecking, setPrechecking] = useState(false);
@@ -292,10 +297,9 @@ export default function NewJobView({ devices, cliReady, pyReady, onSubmitted, on
                             )}
                             {tab === 'advanced' &&
                                 (isPython ? (
-                                    <NotApplicableCard
-                                        title="高级选项不适用于旗舰引擎"
-                                        desc="Vulkan 设备选择与解码硬件加速是 ncnn CLI 的概念；旗舰引擎始终使用 PyTorch CUDA 设备 0，由 worker.py 自动调度显存。"
-                                    />
+                                    // 旗舰引擎：仅暴露 CUDA 设备选择（CUDA 编号空间），
+                                    // 解码加速/基准等 ncnn 概念不适用
+                                    <AdvancedSection req={req} onChange={patch} devices={cudaDevices} python bare />
                                 ) : (
                                     <AdvancedSection req={req} onChange={patch} devices={devices} bare />
                                 ))}

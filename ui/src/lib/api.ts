@@ -20,6 +20,9 @@ export const api = {
 
     devices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/devices'),
 
+    // CUDA 设备枚举（旗舰引擎专用）：编号空间与 Vulkan 相互独立，不可混用
+    cudaDevices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/cuda-devices'),
+
     browse: (kind: 'open' | 'save' | 'dir') =>
         jsonFetch<{ files: string[] }>('/api/browse', {
             method: 'POST',
