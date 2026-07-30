@@ -1,0 +1,29 @@
+pkgname=video2x-git
+pkgver=6.0.0
+pkgrel=1
+pkgdesc="A machine learning-based video super resolution and frame interpolation framework"
+arch=('x86_64')
+url="https://github.com/k4yt3x/video2x"
+license=('AGPL-3.0-only')
+depends=('ffmpeg' 'ncnn' 'openmp' 'vulkan-driver' 'spdlog' 'boost-libs')
+makedepends=('git' 'cmake' 'clang' 'vulkan-headers' 'boost')
+
+pkgver() {
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+    git rm ../third_party/{ncnn,spdlog,boost}
+    git submodule update --init --recursive
+}
+
+build() {
+    cmake -B build -S .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_CXX_COMPILER=clang++ -DVIDEO2X_ENABLE_X86_64_V3=ON
+    cmake --build build --config Release --parallel
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}
+

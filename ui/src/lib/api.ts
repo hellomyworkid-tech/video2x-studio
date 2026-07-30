@@ -1,0 +1,199 @@
+// API client + SSE job stream for Video2X Studio
+
+import type {
+    AssetsState, GpuDevice, Job, JobRequest, PrecheckResponse, PythonEngineStatus,
+} from '@/types';
+import { buildArgsForFile, buildOutputPath, buildPythonArgs, engineFor } from '@/lib/args';
+
+async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(url, init);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `请求失败（${res.status}）`);
+    return body as T;
+}
+
+export const api = {
+    health: () => jsonFetch<{
+        ok: boolean; cliPath: string; cliExists: boolean;
+        pythonEngine: PythonEngineStatus;
+    }>('/api/health'),
+
+    devices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/devices'),
+
+    browse: (kind: 'open' | 'save' | 'dir') =>
+        jsonFetch<{ files: string[] }>('/api/browse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind }),
+        }),
+
+    jobs: () => jsonFetch<{ jobs: Job[] }>('/api/jobs'),
+
+    submitBatch: async (req: JobRequest) => {
+        const engine = engineFor(req.processor.kind);
+        const items = req.files.map((file) => {
+            const outPath = buildOutputPath(req, file);
+            const args = engine === 'python'
+                ? buildPythonArgs(req, file, outPath)
+                : buildArgsForFile(req, file, outPath);
+            return { file, outPath, args, engine, autoStage: req.advanced.autoStage };
+        });
+        return jsonFetch<{ batchId: number; jobs: Job[] }>('/api/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items }),
+        });
+    },
+
+    abortJob: (id: number) =>
+        jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/abort`, { method: 'POST' }),
+
+    pauseJob: (id: number) =>
+        jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/pause`, { method: 'POST' }),
+
+    unpauseJob: (id: number) =>
+        jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/unpause`, { method: 'POST' }),
+
+    suspendJob: (id: number) =>
+        jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/suspend`, { method: 'POST' }),
+
+    unsuspendJob: (id: number) =>
+        jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/unsuspend`, { method: 'POST' }),
+
+    resumeJob: (id: number) =>
+        jsonFetch<{ ok: boolean; checkpoint: boolean }>(`/api/jobs/${id}/resume`, { method: 'POST' }),
+
+    cancelPending: () =>
+        jsonFetch<{ ok: boolean; count: number }>('/api/jobs/cancel-pending', { method: 'POST' }),
+
+    resumeAll: () =>
+        jsonFetch<{ ok: boolean; count: number }>('/api/jobs/resume-all', { method: 'POST' }),
+
+    openFolder: (id: number) =>
+        jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/open-folder`, { method: 'POST' }),
+
+    residual: (id: number) =>
+        jsonFetch<{ status: string; canResume: boolean; residuals: { path: string; size: number; kind: string }[] }>(`/api/jobs/${id}/residual`),
+
+    residuals: () =>
+        jsonFetch<{ items: { id: number; fileName: string; status: string; canResume: boolean; residuals: { path: string; size: number; kind: string }[] }[] }>('/api/jobs/residuals'),
+
+    deleteJob: (id: number, mode: 'record' | 'all' = 'record') =>
+        jsonFetch<{ ok: boolean; deletedFiles: number }>(`/api/jobs/${id}/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode }),
+        }),
+
+    clearFinished: (mode: 'record' | 'all' = 'record') =>
+        jsonFetch<{ ok: boolean; cleared: number; deletedFiles: number }>('/api/jobs/clear-finished', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode }),
+        }),
+
+    assets: () => jsonFetch<AssetsState>('/api/assets'),
+
+    downloadAsset: (id: string) =>
+        jsonFetch<{ ok: boolean; started?: boolean; already?: boolean }>('/api/assets/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id }),
+        }),
+
+    precheck: (file: string, model: string) =>
+        jsonFetch<PrecheckResponse>('/api/jobs/precheck', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file, model }),
+        }),
+
+    expand: (paths: string[]) =>
+        jsonFetch<{ files: string[]; truncated: boolean }>('/api/expand', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paths }),
+        }),
+};
+
+// Subscribe to the job stream; returns an unsubscribe function.
+export function subscribeJobs(onJobs: (jobs: Job[]) => void): () => void {
+    let es: EventSource | null = null;
+    let stopped = false;
+    let lastEventAt = Date.now();
+
+    const connect = () => {
+        if (stopped) return;
+        lastEventAt = Date.now();
+        es = new EventSource('/api/events');
+        es.addEventListener('jobs', (ev) => {
+            lastEventAt = Date.now();
+            try {
+                onJobs(JSON.parse((ev as MessageEvent).data));
+            } catch { /* ignore malformed payloads */ }
+        });
+        es.addEventListener('ping', () => { lastEventAt = Date.now(); });
+        es.onerror = () => {
+            es?.close();
+            es = null;
+            if (!stopped) setTimeout(connect, 2000); // auto-reconnect
+        };
+    };
+    connect();
+
+    // 45s 无任何事件（含心跳）判定连接假死（系统休眠恢复后的典型场景），
+    // 主动重连；重连后 bridge 会立即补发全量快照，界面自动追上真实状态
+    const watchdog = setInterval(() => {
+        if (!stopped && Date.now() - lastEventAt > 45000) {
+            es?.close();
+            es = null;
+            connect();
+        }
+    }, 15000);
+
+    return () => {
+        stopped = true;
+        clearInterval(watchdog);
+        es?.close();
+    };
+}
+
+// Subscribe to asset download progress; returns an unsubscribe function.
+export function subscribeAssets(onState: (s: AssetsState) => void): () => void {
+    let es: EventSource | null = null;
+    let stopped = false;
+    let lastEventAt = Date.now();
+
+    const connect = () => {
+        if (stopped) return;
+        lastEventAt = Date.now();
+        es = new EventSource('/api/events');
+        es.addEventListener('assets', (ev) => {
+            lastEventAt = Date.now();
+            try {
+                onState(JSON.parse((ev as MessageEvent).data));
+            } catch { /* ignore malformed payloads */ }
+        });
+        es.addEventListener('ping', () => { lastEventAt = Date.now(); });
+        es.onerror = () => {
+            es?.close();
+            es = null;
+            if (!stopped) setTimeout(connect, 3000);
+        };
+    };
+    connect();
+
+    const watchdog = setInterval(() => {
+        if (!stopped && Date.now() - lastEventAt > 45000) {
+            es?.close();
+            es = null;
+            connect();
+        }
+    }, 15000);
+
+    return () => {
+        stopped = true;
+        clearInterval(watchdog);
+        es?.close();
+    };
+}

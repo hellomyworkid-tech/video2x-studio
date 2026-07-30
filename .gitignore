@@ -1,0 +1,110 @@
+# Data files
+data/
+
+# Built-binaries
+bin/
+build/
+
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+#*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+#*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+# clang tooling compilation databases
+.cache/
+*.plist
+
+# CMake
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+CMakeUserPresets.json
+
+# ---------------------------------------------------------------------------
+# Video2X Studio 项目特定排除（首个 git 基线）
+# ---------------------------------------------------------------------------
+
+# 构建树与产物
+build-desktop/
+build/
+out/
+
+# 前端依赖与构建/打包产物
+ui/node_modules/
+ui/dist/
+ui/release/
+
+# Python 引擎运行时（嵌入式解释器/虚拟环境，体积大、可重建）
+engine-python/.venv/
+engine-python/python/
+__pycache__/
+*.pyc
+
+# 模型权重（通过内置资产下载系统获取，含国内镜像）
+engine-python/weights/
+engine-python/downloads/
+models/
+
+# 第三方预编译依赖（ffmpeg/ncnn 等，构建脚本可重新获取）
+third_party/
+
+# 运行时缓存与状态（任务队列持久化、暂存文件）
+cache/
+downloads/
+*.log

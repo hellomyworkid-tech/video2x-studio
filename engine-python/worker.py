@@ -1,0 +1,558 @@
+# -*- coding: utf-8 -*-
+"""Video2X Python sidecar worker — PyTorch-based flagship VSR engines.
+
+Spawned by the bridge like:
+   python worker.py --model realbasicvsr -i in.mp4 -o out.mp4 --codec libx264 --crf 18
+
+Decode/encode uses the ffmpeg binaries shipped with the project
+(third_party/ffmpeg-shared/bin). Progress lines match the bridge regex:
+  frame=i/N (P%); fps=F; elapsed=...; remaining=...
+
+Chunking: the video is processed in overlapping chunks (bidirectional
+propagation needs temporal context). Each chunk's tail `overlap` frames are
+re-computed by the next chunk with better context; encoder receives every
+output frame exactly once, in order.
+
+断点续跑（RealBasicVSR）：视频按 --seg-len 宏分片处理，每完成一片立即
+落盘 <out>.segNNNNNN.mp4 并更新 <out>.v2xckpt.json（含参数指纹）。
+中止/失败后重新以相同参数启动即可从下一个未完成分片继续；
+全部完成后自动合并为最终文件并清理分片与检查点。
+参数指纹不一致（模型/编码/CRF/输入文件变动/分片长度不同）时拒绝续跑，
+从头重跑，防止错误拼接。
+"""
+
+import argparse
+import glob
+import json
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+# Windows 中文系统默认 GBK：worker 的日志与 ffprobe 输出都含 UTF-8 字节，
+# 必须显式统一为 UTF-8，否则子进程读线程会 UnicodeDecodeError
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# 必须在 import torch 之前设置：减少长序列注意力下的显存碎片化
+import os
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
+import numpy as np
+
+ENGINE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = ENGINE_DIR.parent
+FFMPEG_DIR = PROJECT_ROOT / 'third_party' / 'ffmpeg-shared' / 'bin'
+FFMPEG = FFMPEG_DIR / 'ffmpeg.exe'
+FFPROBE = FFMPEG_DIR / 'ffprobe.exe'
+
+
+def log(msg):
+    print(f'[worker] {msg}', flush=True)
+
+
+def fail(msg, code=1):
+    print(f'[worker] ERROR: {msg}', flush=True)
+    sys.exit(code)
+
+
+def start_decode_watchdog(dec_proc, warn_after=60, kill_after=300, suspend_flag=None,
+                          enc_proc=None):
+    """管道心跳看门狗。
+
+    只在 read_frame 阻塞等待解码输出、或 write_frame 阻塞写入编码管道期间
+    计时（推理阶段不计）。等待超过 warn_after 秒打印警告，超过 kill_after
+    秒判定为挂死：强杀解码/编码进程并以退出码 3 结束。
+    典型场景：网络源解码挂死、异常封装 seek 卡死、编码端磁盘/NAS 写入停滞
+    （编码器停止消费 → 管道反压 → 写入侧永久阻塞，此路径仅本看门狗覆盖）。
+    RealBasicVSR/SeedVR2 分片与检查点已落盘，重新启动可从断点续跑；
+    FlashVSR 则需整段重来。
+    suspend_flag：进程挂起旗标文件（bridge 挂起进程树前写入）。旗标存在时
+    豁免计时并重置心跳，避免按墙钟把"真暂停"误判为挂死。
+    返回 (begin, end, stop)：read/write 前后各调一次，结束后 stop。
+    """
+    st = {'since': None, 'stop': False}
+
+    def _wd():
+        warned = False
+        while not st['stop']:
+            time.sleep(5)
+            if suspend_flag and os.path.exists(suspend_flag):
+                # 进程树被挂起（真暂停）：重置计时，解冻后从头计
+                st['since'] = None
+                warned = False
+                continue
+            since = st['since']
+            if since is None:
+                warned = False
+                continue
+            idle = time.time() - since
+            if idle > kill_after:
+                log(f'超过 {kill_after}s 无任何进展，判定为挂死'
+                    f'（解码停滞、编码端磁盘/网络盘写入卡死，或 GPU 推理 kernel 挂死）。'
+                    f'已自动退出；断点已保存，可直接续跑；'
+                    f'若怀疑显卡状态异常，建议重启电脑后再续跑；'
+                    f'若输出在网络盘上，请检查网络连接或改输出到本地磁盘。')
+                for proc in (dec_proc, enc_proc):
+                    if proc is None:
+                        continue
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                os._exit(3)
+            if idle > warn_after:
+                if not warned:
+                    warned = True
+                    log(f'警告: 已 {int(idle)}s 无进展'
+                        f'（解码/编码管道停滞或推理挂死），仍在等待；'
+                        f'超过 {kill_after}s 将自动退出（断点可续跑）。')
+            else:
+                warned = False
+
+    threading.Thread(target=_wd, daemon=True).start()
+
+    def begin():
+        st['since'] = time.time()
+
+    def end():
+        st['since'] = None
+
+    def stop():
+        st['stop'] = True
+
+    def beat():
+        """推理心跳：每个推理块/批开始或推进时调用，重置挂死倒计时。
+        GPU kernel 挂死时心跳停止，kill_after 秒后看门狗触发。"""
+        st['since'] = time.time()
+
+    return begin, end, stop, beat
+
+
+def pause_requested(out_path):
+    """bridge 通过 <out>.v2xpause 旗标文件请求在检查点优雅暂停。
+    看到即删除旗标并返回 True；调用方应在宏分片边界以退出码 4 退出。"""
+    p = str(out_path) + '.v2xpause'
+    if os.path.exists(p):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+        return True
+    return False
+
+
+def probe(path):
+    cmd = [str(FFPROBE), '-v', 'quiet', '-print_format', 'json',
+           '-show_format', '-show_streams', str(path)]
+    # 不用 text=True（会按系统区域 GBK 解码）：手动按 UTF-8 容错解码
+    out = subprocess.run(cmd, capture_output=True)
+    if out.returncode != 0:
+        err = (out.stderr or b'').decode('utf-8', errors='replace')
+        fail(f'ffprobe 失败: {err[:300]}')
+    info = json.loads(out.stdout.decode('utf-8', errors='replace'))
+    vstream = next((s for s in info['streams'] if s['codec_type'] == 'video'), None)
+    if vstream is None:
+        fail('输入文件没有视频流')
+    has_audio = any(s['codec_type'] == 'audio' for s in info['streams'])
+
+    num, den = vstream['avg_frame_rate'].split('/')
+    fps = float(num) / float(den) if float(den) > 0 else 25.0
+
+    nb = vstream.get('nb_frames')
+    if nb and nb.isdigit():
+        total = int(nb)
+    else:
+        total = int(float(info['format'].get('duration', 0)) * fps)
+
+    return {
+        'width': int(vstream['width']),
+        'height': int(vstream['height']),
+        'fps': fps,
+        'total': total,
+        'has_audio': has_audio,
+        # 音频编码名：合并/直编时判断能否无损拷进目标容器（cook 等需转 AAC）
+        'audio_codec': next(
+            (s.get('codec_name', '') for s in info['streams'] if s['codec_type'] == 'audio'), ''),
+    }
+
+
+def fmt_hms(seconds):
+    seconds = max(0, int(seconds))
+    return f'{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}'
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--model', required=True, choices=['realbasicvsr', 'flashvsr', 'seedvr2'])
+    ap.add_argument('-i', '--input', required=True)
+    ap.add_argument('-o', '--output', required=True)
+    ap.add_argument('--codec', default='libx264')
+    ap.add_argument('--crf', type=int, default=18)
+    ap.add_argument('--chunk', type=int, default=32, help='推理分块长度（帧）')
+    ap.add_argument('--overlap', type=int, default=8, help='分块重叠长度（帧）')
+    ap.add_argument('--segment', type=int, default=200, help='FlashVSR 分段帧数（0=整段）')
+    ap.add_argument('--seg-len', type=int, default=240, help='断点续跑宏分片长度（帧）')
+    ap.add_argument('--resolution', type=int, default=0, help='SeedVR2 目标短边像素（0=输入短边×4）')
+    ap.add_argument('--batch-size', type=int, default=5, help='SeedVR2 内部批大小（4n+1）')
+    ap.add_argument('--blocks-to-swap', type=int, default=-1, help='SeedVR2 BlockSwap 块数（-1=按显存自动）')
+    ap.add_argument('--conv3d-workaround', choices=['auto', 'on', 'off'], default='auto',
+                    help='SeedVR2 cuDNN Conv3d 绕路（省显存但慢）；auto=显存<12GB 时开启')
+    ap.add_argument('--device', default='cuda')
+    ap.add_argument('--no-fp16', action='store_true', help='禁用半精度（排障用）')
+    ap.add_argument('--max-frames', type=int, default=0, help='仅处理前 N 帧（调试用）')
+    ap.add_argument('--debug', action='store_true', help='引擎调试日志')
+    args = ap.parse_args()
+
+    if args.model == 'flashvsr':
+        sys.path.insert(0, str(ENGINE_DIR))
+        from vsr_models.flashvsr_runner import main as flash_main
+        flash_main(args)
+        return
+
+    if args.model == 'seedvr2':
+        sys.path.insert(0, str(ENGINE_DIR))
+        if args.segment == 200:
+            args.segment = 121  # worker 的 200 是 FlashVSR 默认；SeedVR2 内部时序段用 121
+        if args.seg_len == 240:
+            args.seg_len = 120  # SeedVR2 极慢（约 0.4fps）：检查点加密到 120 帧，
+                                # 暂停/断点续跑粒度从约 10 分钟降到约 5 分钟
+        from vsr_models.seedvr2_runner import main as seed_main
+        seed_main(args)
+        return
+
+    if args.overlap >= args.chunk:
+        fail('overlap 必须小于 chunk')
+
+    if not FFMPEG.exists():
+        fail(f'未找到 ffmpeg: {FFMPEG}')
+
+    meta = probe(args.input)
+    W, H, FPS, TOTAL = meta['width'], meta['height'], meta['fps'], meta['total']
+    if args.max_frames > 0:
+        TOTAL = min(TOTAL, args.max_frames)
+    OW, OH = W * 4, H * 4  # RealBasicVSR 固定 x4
+    log(f'输入: {W}x{H} @ {FPS:.3f}fps, 共 {TOTAL} 帧（RealBasicVSR x4 → {OW}x{OH}）')
+
+    # ---- model (lazy import: keeps --help fast) ----
+    import torch
+    sys.path.insert(0, str(ENGINE_DIR))
+    from vsr_models.realbasicvsr import load_realbasicvsr
+
+    use_cuda = args.device.startswith('cuda') and torch.cuda.is_available()
+    # 保留完整设备字符串：'cuda:1' 必须原样传给 .to()，否则多卡下永远坍缩到 0 号卡
+    device = args.device if use_cuda else 'cpu'
+    if use_cuda:
+        # empty_cache() / autocast('cuda') 等都作用于"当前设备"（默认 0 号卡）：
+        # 不调用 set_device，多卡下显存回收与 autocast 上下文全部落错卡
+        torch.cuda.set_device(device)
+    fp16 = use_cuda and not args.no_fp16
+    model = load_realbasicvsr(
+        ENGINE_DIR / 'weights' / 'realbasicvsr_x4.pth',
+        ENGINE_DIR / 'weights' / 'spynet.pth',
+        device=device, fp16=fp16)
+    log(f'模型已加载（device={device}, fp16={fp16}）')
+
+    # ---- 高分辨率自适应：空间分块推理 ----
+    TILE, TILE_OLAP = 512, 64
+    tiled = H > TILE or W > TILE
+    if tiled and args.chunk > 16:
+        args.chunk, args.overlap = 16, 6
+        log(f'高分辨率输入：启用空间分块推理（tile={TILE}, 时间分块 {args.chunk}/{args.overlap}）')
+
+    def build_ramp(n, ramp):
+        wgt = torch.ones(n)
+        if ramp > 0:
+            r = torch.linspace(0.0, 1.0, ramp + 2)[1:-1]
+            wgt[:ramp] = r
+            wgt[-ramp:] = r.flip(0)
+        return wgt
+
+    def infer(lqs):
+        """lqs: (1,T,3,H,W) 0..1 → (1,T,3,4H,4W)；高分辨率自动分块+羽化"""
+        if not tiled:
+            with torch.autocast('cuda', dtype=torch.float16, enabled=fp16):
+                return model(lqs).float()
+        T = lqs.shape[1]
+        acc = torch.zeros(1, T, 3, OH, OW, dtype=torch.float16, device=device)
+        wacc = torch.zeros(1, 1, 1, OH, OW, dtype=torch.float16, device=device)
+        step = TILE - TILE_OLAP
+        seen = set()
+        for y0 in range(0, H, step):
+            for x0 in range(0, W, step):
+                y1, x1 = min(y0 + TILE, H), min(x0 + TILE, W)
+                if y1 == H:
+                    y0 = max(0, H - TILE)
+                if x1 == W:
+                    x0 = max(0, W - TILE)
+                if (y0, x0) in seen:
+                    continue
+                seen.add((y0, x0))
+                with torch.autocast('cuda', dtype=torch.float16, enabled=fp16):
+                    # .contiguous()：切片是非连续视图，RealBasicVSR 内部若对输入做
+                    # 原地填充/改写会污染 lqs 缓冲，进而影响后续相邻分块
+                    o = model(lqs[:, :, :, y0:y1, x0:x1].contiguous()).float()
+                oy0, ox0, oy1, ox1 = y0 * 4, x0 * 4, y1 * 4, x1 * 4
+                ramp_y = TILE_OLAP * 4 if 0 < y0 or y1 < H else 0
+                ramp_x = TILE_OLAP * 4 if 0 < x0 or x1 < W else 0
+                wy = build_ramp(oy1 - oy0, ramp_y).view(1, 1, 1, -1, 1)
+                wx = build_ramp(ox1 - ox0, ramp_x).view(1, 1, 1, 1, -1)
+                wm = (wy * wx).to(device=device, dtype=torch.float16)
+                acc[:, :, :, oy0:oy1, ox0:ox1] += o.half() * wm
+                wacc[:, :, :, oy0:oy1, ox0:ox1] += wm
+                del o
+        # 原地相除，避免再产生一块 11GB 级 fp32 副本；写出帧时再转 uint8
+        acc.div_(wacc.clamp_min(1e-6))
+        del wacc
+        torch.cuda.empty_cache()
+        return acc  # fp16 (1,T,3,OH,OW)
+
+    # ------------------------------------------------------------------
+    # 断点续跑：宏分片 + 检查点
+    # ------------------------------------------------------------------
+    seg_len = max(24, args.seg_len)
+    out_path = str(args.output)
+    ckpt_file = Path(out_path + '.v2xckpt.json')
+
+    def seg_path(frame0):
+        return f'{out_path}.seg{frame0:06d}.mp4'
+
+    in_stat = os.stat(args.input)
+    fingerprint = {
+        'model': args.model, 'codec': args.codec, 'crf': args.crf,
+        'input': str(Path(args.input).resolve()),
+        'isize': in_stat.st_size, 'imtime': int(in_stat.st_mtime),
+        'w': W, 'h': H, 'fps': round(FPS, 3), 'total': TOTAL,
+        'segLen': seg_len, 'tiled': tiled,
+    }
+
+    def cleanup_stale_segs():
+        for f in glob.glob(f'{out_path}.seg*.mp4'):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+    resume_from = 0
+    if ckpt_file.exists():
+        try:
+            old = json.loads(ckpt_file.read_text(encoding='utf-8'))
+        except Exception:
+            old = None
+        if old and old.get('fp') == fingerprint and 0 < int(old.get('nextFrame', 0)) < TOTAL:
+            resume_from = int(old['nextFrame'])
+            log(f'检测到有效断点：从第 {resume_from} 帧续跑（已完成 {resume_from}/{TOTAL}）')
+        else:
+            if old and old.get('fp') == fingerprint and int(old.get('nextFrame', 0)) >= TOTAL:
+                resume_from = TOTAL  # 分片已齐，直接进入合并
+                log('分片已全部完成，直接执行合并')
+            else:
+                log('检查点缺失或参数指纹不一致，从头重跑（清理旧分片）')
+                cleanup_stale_segs()
+                try:
+                    ckpt_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    frame_bytes = W * H * 3
+    fps_str = f'{FPS:.6f}'.rstrip('0').rstrip('.')
+    written = resume_from
+    t0 = time.time()
+
+    def emit_progress():
+        elapsed = time.time() - t0
+        done = written - resume_from
+        fps_now = done / elapsed if elapsed > 0 else 0.0
+        remain = (TOTAL - written) / fps_now if fps_now > 0 else 0
+        pct = 100.0 * written / TOTAL
+        print(f'frame={written}/{TOTAL} ({pct:.1f}%); fps={fps_now:.2f}; '
+              f'elapsed={fmt_hms(elapsed)}; remaining={fmt_hms(remain)}',
+              flush=True)
+
+    def write_ckpt(next_frame):
+        tmp = ckpt_file.with_suffix('.tmp')
+        tmp.write_text(json.dumps({'nextFrame': next_frame, 'fp': fingerprint}),
+                       encoding='utf-8')
+        tmp.replace(ckpt_file)
+
+    def run_segment(seg_start, seg_end):
+        """推理并编码 [seg_start, seg_end) 帧到独立分片文件"""
+        nonlocal written
+        seg_file = seg_path(seg_start)
+        # 多解 8 帧作为时序上下文，丢弃对应输出，减少分片边界的质量跳变
+        # seek_frame=0 时不带 -ss：无索引（cues 缺失）的损坏文件带 -ss 会 seek 到虚空，
+        # 导致整段解码 0 帧；不带 -ss 从头解码反而正常
+        seek_frame = max(0, seg_start - 8)
+        dec_pre = [] if seek_frame == 0 else ['-ss', f'{seek_frame / FPS:.6f}']
+        dec_cmd = [str(FFMPEG), '-hide_banner', '-loglevel', 'error',
+                   *dec_pre, '-i', args.input,
+                   '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
+        enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
+                   '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                   '-s', f'{OW}x{OH}', '-r', fps_str, '-i', 'pipe:0',
+                   '-an', '-c:v', args.codec, '-crf', str(args.crf),
+                   '-pix_fmt', 'yuv420p', seg_file]
+        dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
+                               bufsize=frame_bytes * 4)
+        enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
+        wd_begin, wd_end, wd_stop, wd_beat = start_decode_watchdog(
+            dec, suspend_flag=str(args.output) + '.v2xsuspended', enc_proc=enc)
+
+        def read_frame():
+            wd_begin()
+            buf = dec.stdout.read(frame_bytes)
+            wd_end()
+            if not buf or len(buf) < frame_bytes:
+                return None
+            return np.frombuffer(buf, np.uint8).reshape(H, W, 3)
+
+        def write_frame(t):
+            arr = (t.clamp_(0, 1) * 255.0).round().to(torch.uint8)
+            wd_begin()
+            try:
+                enc.stdin.write(arr.permute(1, 2, 0).contiguous().cpu().numpy().tobytes())
+            finally:
+                wd_end()
+
+        next_read = seek_frame
+        pending = []
+        eof = False  # 解码器提前 EOF（源尾部损坏/帧数虚报）
+        with torch.no_grad():
+            while written < seg_end:
+                chunk = list(pending)
+                s = next_read - len(pending)
+                while len(chunk) < args.chunk and next_read < seg_end and not eof:
+                    f = read_frame()
+                    if f is None:
+                        eof = True
+                        break
+                    next_read += 1
+                    chunk.append(torch.from_numpy(f.copy()).permute(2, 0, 1))
+                if not chunk:
+                    break
+                if len(chunk) == 1:  # SPyNet 需要至少 2 帧
+                    chunk.append(chunk[0].clone())
+
+                lqs = torch.stack(chunk, dim=0)[None].float().div_(255.0).to(device)
+                wd_beat()  # 推理心跳：kernel 挂死时心跳停止，看门狗将自动退出
+                out = infer(lqs)
+                t_len = out.shape[1]
+
+                # EOF 必须视同末块：否则 pending 帧会被无限重复推理（死循环）
+                is_last_chunk = eof or next_read >= seg_end
+                take_from = max(0, written - s)
+                take_to = t_len if is_last_chunk else t_len - args.overlap
+                if take_to <= take_from:      # 异常短块兜底
+                    take_to = t_len
+
+                for i in range(take_from, take_to):
+                    if written >= seg_end:
+                        break
+                    write_frame(out[0, i])
+                    written += 1
+                    if written % 5 == 0 or written == seg_end:
+                        emit_progress()
+                del out, lqs
+
+                if is_last_chunk:
+                    break
+                pending = chunk[-args.overlap:]
+
+        if eof and next_read < seg_end:
+            log(f'警告: 源在第 {next_read} 帧后无可解码内容（尾部损坏或封装帧数虚报），'
+                f'本段只产出 {written - seg_start} 帧，比预期少 {seg_end - next_read} 帧')
+
+        try:
+            enc.stdin.close()
+        except BrokenPipeError:
+            pass
+        dec.stdout.close()
+        dec.wait()
+        wd_stop()
+        rc = enc.wait()
+        if rc != 0:
+            fail(f'ffmpeg 分片编码器退出码 {rc}')
+        if written > seg_start:
+            # 空分片（源尾部损坏零产出）不落检查点：避免续跑跳过已被守卫删除的分片
+            write_ckpt(seg_end)
+        log(f'分片完成: {seg_start}-{seg_end} → {Path(seg_file).name}')
+
+    # ---- 逐宏分片处理 ----
+    total_out = TOTAL
+    for seg_start in range(resume_from, TOTAL, seg_len):
+        if pause_requested(out_path):
+            log(f'收到暂停请求：停在检查点（已完成 {seg_start}/{TOTAL}，可续跑）')
+            sys.exit(4)
+        before = written
+        run_segment(seg_start, min(seg_start + seg_len, TOTAL))
+        if written == before:
+            # 源在该分片起点已无可解码帧（尾部损坏）：删除空分片与残留检查点，提前收尾
+            log(f'警告: 第 {seg_start} 帧起无可解码内容，按 {written} 帧提前收尾')
+            total_out = seg_start
+            for p in (seg_path(seg_start), str(ckpt_file)):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            break
+
+    # ---- 合并分片（续跑时之前的分片已在盘上） ----
+    if total_out == 0 or written == 0:
+        fail('源文件完全无法解码（文件损坏或封装异常），没有可输出的帧。'
+             '建议先用播放器确认源能正常播放。')
+
+    expected = [seg_path(f) for f in range(0, total_out, seg_len)]
+    missing = [p for p in expected if not os.path.exists(p)]
+    if missing:
+        fail(f'缺少 {len(missing)} 个分片，无法合并（如 {Path(missing[0]).name}）')
+
+    list_file = out_path + '.mergelist.txt'
+    with open(list_file, 'w', encoding='utf-8') as lf:
+        for p in expected:
+            lf.write("file '" + p.replace('\\', '/').replace("'", "'\\''") + "'\n")
+
+    merge_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
+                 '-f', 'concat', '-safe', '0', '-i', list_file]
+    if meta['has_audio']:
+        merge_cmd += ['-i', args.input, '-map', '0:v:0', '-map', '1:a?',
+                      '-c:v', 'copy', '-c:a', 'copy', '-shortest']
+    else:
+        merge_cmd += ['-c:v', 'copy']
+    merge_cmd += [out_path]
+    m = subprocess.run(merge_cmd, capture_output=True)
+    if m.returncode != 0 and meta['has_audio'] and '-c:a' in merge_cmd:
+        # 源音频编码无法无损塞进目标容器（如 cook→mp4）：回退 AAC 转码重试一次，
+        # 视频流仍保持 copy 无损，代价仅音频重编码
+        log('音频无损拷贝进目标容器失败，回退 AAC 转码后重新合并')
+        merge_cmd[merge_cmd.index('-c:a') + 1] = 'aac'
+        m = subprocess.run(merge_cmd, capture_output=True)
+    if m.returncode != 0:
+        err = (m.stderr or b'').decode('utf-8', errors='replace')
+        fail(f'分片合并失败: {err[:300]}（分片已保留，可重新运行续合并）')
+
+    for p in expected:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    try:
+        os.remove(list_file)
+        ckpt_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+    emit_progress()
+    log(f'完成: {args.output}（{written} 帧）')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        fail(str(e))

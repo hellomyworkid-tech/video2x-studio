@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Video2X Studio — deep-space dark theme, single mode */
+    --background: 222 47% 5%;
+    --foreground: 210 30% 96%;
+    --card: 221 39% 8%;
+    --card-foreground: 210 30% 96%;
+    --popover: 220 35% 11%;
+    --popover-foreground: 210 30% 96%;
+    --primary: 187 92% 55%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 220 25% 14%;
+    --secondary-foreground: 210 25% 92%;
+    --muted: 220 25% 13%;
+    --muted-foreground: 215 15% 55%;
+    --accent: 187 60% 18%;
+    --accent-foreground: 187 92% 70%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 20% 16%;
+    --input: 220 22% 14%;
+    --ring: 187 92% 55%;
+    --radius: 0.75rem;
+    --sidebar-background: 223 47% 6%;
+    --sidebar-foreground: 215 15% 60%;
+    --sidebar-primary: 187 92% 55%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 220 30% 12%;
+    --sidebar-accent-foreground: 187 92% 65%;
+    --sidebar-border: 220 20% 13%;
+    --sidebar-ring: 187 92% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    overflow: hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(220 20% 20%);
+    border-radius: 8px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(220 20% 28%);
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(120deg, #22d3ee 0%, #818cf8 55%, #c084fc 100%);
+  }
+  .glass-card {
+    background: linear-gradient(160deg, hsl(221 39% 9% / 0.9), hsl(222 40% 7% / 0.95));
+    border: 1px solid hsl(220 20% 16% / 0.8);
+    backdrop-filter: blur(12px);
+  }
+  .glow-primary {
+    box-shadow: 0 0 0 1px hsl(187 92% 55% / 0.25), 0 8px 32px -8px hsl(187 92% 45% / 0.35);
+  }
+  .pulse-dot {
+    animation: pulse-dot 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+@keyframes fade-slide-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-slide-in {
+  animation: fade-slide-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
