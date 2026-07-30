@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "desktop": "electron .",
-    "dist": "npm run build && electron-builder --win portable"
+    "dist": "npm run build && electron-builder --win dir",
+    "dist:portable": "npm run build && electron-builder --win portable"
   },
   "build": {
     "appId": "studio.video2x.desktop",
@@ -95,6 +96,10 @@
       {
         "from": "../SOURCE.txt",
         "to": "SOURCE.txt"
+      },
+      {
+        "from": "../COMPLIANCE.md",
+        "to": "COMPLIANCE.md"
       }
     ],
     "directories": {

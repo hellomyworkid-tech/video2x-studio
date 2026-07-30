@@ -363,14 +363,18 @@ def load_realbasicvsr(ckpt_path, spynet_path=None, device='cuda', fp16=True,
         if sp_missing:
             raise RuntimeError(f'SPyNet 权重缺失键: {sp_missing[:10]}')
     else:
-        # 无独立 SPyNet 权重时，靠主 checkpoint 内嵌键填充（官方 ckpt 含全部 124 键）。
-        # 若主权重也不含，spynet 将保持随机初始化——不报错但输出是坏的，必须明确告警
-        embedded = sum(1 for k in sd if 'spynet' in k)
-        if embedded:
-            print(f'[realbasicvsr] 未提供独立 SPyNet 权重，使用主权重内嵌键（{embedded} 个）')
+        # 无独立 SPyNet 权重时，靠主 checkpoint 内嵌键填充。
+        # 守卫必须比对模型实际需要的键集，而非松匹配计数——
+        # 若主权重不含（或键在别的前缀下），spynet 将保持随机初始化，
+        # 不报错但输出是坏的，必须明确告警
+        need = {f'basicvsr.spynet.{k}' for k in model.basicvsr.spynet.state_dict()}
+        covered = sum(1 for k in need if k in sd)
+        if covered == len(need):
+            print(f'[realbasicvsr] 未提供独立 SPyNet 权重，'
+                  f'使用主权重内嵌键（{covered}/{len(need)}）')
         else:
-            print('[realbasicvsr] 警告：未提供 spynet.pth 且主权重未内嵌 SPyNet 键，'
-                  '光流网络为随机初始化，输出质量将严重下降')
+            print(f'[realbasicvsr] 警告：未提供 spynet.pth 且主权重内嵌 SPyNet 键不完整'
+                  f'（{covered}/{len(need)}），光流网络部分为随机初始化，输出质量将严重下降')
 
     missing, unexpected = model.load_state_dict(sd, strict=False)
     # keys handled separately / training-only

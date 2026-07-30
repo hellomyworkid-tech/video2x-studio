@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (this branch / 本分支)
+
+- Video2X Studio desktop application (`ui/`, Electron + React): batch queue, pause / resume-at-checkpoint / resume-after-crash with sharded checkpoints, NAS source pre-processing (lossless remux with transcode fallback), automatic model/binary download with mirror fallback, per-GPU CUDA device selection, persistent last-used configuration.
+- Three Python VSR engines (`engine-python/`): FlashVSR (flagship, 4×), SeedVR2-3B (flagship, target-resolution), RealBasicVSR (mid-tier, 4×), all with pause/stop-at-checkpoint/resume support.
+- FilterChain architecture in the C++ core (`src/filter_chain.cpp`): composable filter stages.
+- `--denoise` CLI option: FFmpeg-based denoising stage.
+- `--stab` CLI option: two-pass video stabilization via vidstabdetect/vidstabtransform (`src/stab_prepass.cpp`).
+- `--hdr` CLI option: SDR→HDR tone mapping (`src/filter_hdr.cpp`, libplacebo-based).
+- SPAN super-resolution model support via ncnn/Vulkan (`src/filter_span.cpp`).
+- Graceful SPyNet degradation: RealBasicVSR falls back to checkpoint-embedded SPyNet keys when `spynet.pth` is absent (enables commercial-compliant builds).
+
 ### Added
 
 - Option to recalculate the PTS.

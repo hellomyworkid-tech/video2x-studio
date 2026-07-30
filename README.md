@@ -201,6 +201,7 @@ This project includes or depends on these following projects:
 
 More licensing information can be found in the [NOTICE](NOTICE) file.
 Model-weight-specific terms are listed in [WEIGHTS_LICENSES.md](WEIGHTS_LICENSES.md).
+A full redistribution & commercial-use compliance guide is in [COMPLIANCE.md](COMPLIANCE.md).
 
 ## 🌺 Special Thanks
 
