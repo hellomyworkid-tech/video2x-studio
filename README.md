@@ -131,6 +131,21 @@ Copyright (C) 2018-2025 K4YT3X and [contributors](https://github.com/k4yt3x/vide
 
 ![AGPLv3](https://www.gnu.org/graphics/agplv3-155x51.png)
 
+### Source Code Availability / 源码获取
+
+In compliance with AGPL-3.0 §13, the complete corresponding source code of this
+distribution (including the Video2X Studio desktop application, the Python VSR
+engines, and all local modifications) is available in this repository itself —
+clone or download this git repository to obtain the full source:
+
+```
+git clone https://github.com/k4yt3x/video2x.git
+```
+
+本分支（含 Video2X Studio 桌面程序、Python 超分引擎及全部本地修改）的完整对应源码
+即为本仓库内容。若你拿到的是便携包（win-unpacked），包内附带的 `SOURCE.txt`
+指明了对应的源码获取方式。
+
 This project includes or depends on these following projects:
 
 | Project                                                                               | License         |
@@ -141,8 +156,18 @@ This project includes or depends on these following projects:
 | [nihui/realcugan-ncnn-vulkan](https://github.com/nihui/realcugan-ncnn-vulkan)         | MIT License     |
 | [nihui/rife-ncnn-vulkan](https://github.com/nihui/rife-ncnn-vulkan)                   | MIT License     |
 | [xinntao/Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) | MIT License     |
+| [pytorch/pytorch](https://github.com/pytorch/pytorch)                                 | BSD 3-Clause    |
+| [electron/electron](https://github.com/electron/electron)                             | MIT License     |
+| [open-mmlab/mmagic (MMEditing)](https://github.com/open-mmlab/mmagic)                 | Apache 2.0      |
+| [ByteDance-Seed/SeedVR (SeedVR2)](https://github.com/ByteDance-Seed/SeedVR)           | Apache 2.0      |
+| [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | Apache 2.0 |
+| [OpenImagingLab/FlashVSR](https://github.com/OpenImagingLab/FlashVSR)                 | Apache 2.0      |
+| [modelscope/DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio)         | Apache 2.0      |
+| [Wan-Video/Wan2.1 (VAE)](https://github.com/Wan-Video/Wan2.1)                         | Apache 2.0      |
+| [anuragranj/spynet](https://github.com/anuragranj/spynet)（仅权重，经 OpenMMLab 分发） | 非商业/科研用途 |
 
 More licensing information can be found in the [NOTICE](NOTICE) file.
+Model-weight-specific terms are listed in [WEIGHTS_LICENSES.md](WEIGHTS_LICENSES.md).
 
 ## 🌺 Special Thanks
 

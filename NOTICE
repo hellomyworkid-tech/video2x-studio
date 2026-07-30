@@ -18,3 +18,60 @@ The source code can be found at https://github.com/nihui/rife-ncnn-vulkan.
 
 This product depends on ncnn, which is available under the BSD 3-Clause License.
 The source code can be found at https://github.com/Tencent/ncnn.
+
+----------------------------------------------------------------------
+Desktop application (Video2X Studio) third-party components
+----------------------------------------------------------------------
+
+This product depends on PyTorch, which is available under the BSD 3-Clause License.
+The source code can be found at https://github.com/pytorch/pytorch.
+
+This product depends on Electron, which is available under the MIT License.
+The source code can be found at https://github.com/electron/electron.
+
+This product depends on React, which is available under the MIT License.
+The source code can be found at https://github.com/facebook/react.
+
+This product depends on spdlog, which is available under the MIT License.
+The source code can be found at https://github.com/gabime/spdlog.
+
+This product depends on Boost, which is available under the Boost Software License 1.0.
+The source code can be found at https://www.boost.org/.
+
+This product depends on libplacebo, which is available under the GNU Lesser General Public License 2.1.
+The source code can be found at https://github.com/haasn/libplacebo.
+
+This product depends on Vulkan-Headers, which is available under the Apache License 2.0.
+The source code can be found at https://github.com/KhronosGroup/Vulkan-Headers.
+
+----------------------------------------------------------------------
+Python video super-resolution engines (engine-python)
+----------------------------------------------------------------------
+
+This product depends on MMEditing / MMagic (RealBasicVSR implementation),
+which is available under the Apache License 2.0.
+The source code can be found at https://github.com/open-mmlab/mmagic.
+
+This product uses the SPyNet optical-flow weights (spynet_20210409-c6c1bd09.pth)
+as redistributed by OpenMMLab. The SPyNet weights are free for non-commercial
+and scientific research purposes only; for commercial use contact
+ps-license@tue.mpg.de. See https://github.com/anuragranj/spynet.
+
+This product depends on SeedVR2 (ByteDance-Seed), whose code and model
+weights are available under the Apache License 2.0.
+The source code can be found at https://github.com/ByteDance-Seed/SeedVR.
+The vendored inference implementation is ComfyUI-SeedVR2_VideoUpscaler,
+also available under the Apache License 2.0.
+The source code can be found at https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.
+
+This product depends on FlashVSR (OpenImagingLab), which is available
+under the Apache License 2.0.
+The source code can be found at https://github.com/OpenImagingLab/FlashVSR.
+
+This product depends on DiffSynth-Studio (ModelScope community), which is
+available under the Apache License 2.0.
+The source code can be found at https://github.com/modelscope/DiffSynth-Studio.
+
+The FlashVSR weights bundle includes the Wan2.1 VAE (Alibaba Wan2.1),
+which is available under the Apache License 2.0.
+The source code can be found at https://github.com/Wan-Video/Wan2.1.
