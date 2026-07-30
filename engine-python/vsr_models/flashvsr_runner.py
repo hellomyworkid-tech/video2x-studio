@@ -25,7 +25,7 @@ sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
 # reuse the ffmpeg plumbing from worker.py
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, resolve_device  # noqa: E402
 
 
 def compute_scaled_and_target_dims(w0, h0, scale=4.0, multiple=128):
@@ -129,7 +129,9 @@ def main(args):
         dec, suspend_flag=str(args.output) + '.v2xsuspended', enc_proc=enc)
 
     # 尊重 UI 高级选项的显卡选择（worker.py --device cuda:N）
-    device = args.device if str(args.device).startswith('cuda') else 'cuda'
+    device = resolve_device(args.device)
+    if not device.startswith('cuda'):
+        fail(f'FlashVSR 需要 CUDA 设备（收到 --device {args.device}）')
     torch.cuda.set_device(device)  # 让 empty_cache() 作用于所选卡而非恒 0 号卡
     log('加载 FlashVSR 模型（首次约 30~60s）...')
     t_load = time.time()

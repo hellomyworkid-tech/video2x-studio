@@ -59,6 +59,18 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
+def resolve_device(raw):
+    """把 --device 的各种写法归一成带索引形式（'cuda' / 'cuda:1' → 'cuda:0' / 'cuda:1'）。
+
+    torch.cuda.set_device 不接受无索引的 'cuda'（抛 ValueError），而 .to('cuda')
+    可以接受 —— 两个 API 容忍度不同，三个引擎统一在此归一，避免各处重复兜底。
+    非 cuda 值（如 'cpu'）原样返回 'cpu'，由调用方决定是否支持。"""
+    s = str(raw or 'cuda')
+    if not s.startswith('cuda'):
+        return 'cpu'
+    return s if ':' in s else 'cuda:0'
+
+
 def start_decode_watchdog(dec_proc, warn_after=60, kill_after=300, suspend_flag=None,
                           enc_proc=None):
     """管道心跳看门狗。
@@ -242,9 +254,9 @@ def main():
     sys.path.insert(0, str(ENGINE_DIR))
     from vsr_models.realbasicvsr import load_realbasicvsr
 
-    use_cuda = args.device.startswith('cuda') and torch.cuda.is_available()
-    # 保留完整设备字符串：'cuda:1' 必须原样传给 .to()，否则多卡下永远坍缩到 0 号卡
-    device = args.device if use_cuda else 'cpu'
+    use_cuda = str(args.device).startswith('cuda') and torch.cuda.is_available()
+    # resolve_device 统一补索引：'cuda' → 'cuda:0'（set_device 不接受无索引形式）
+    device = resolve_device(args.device) if use_cuda else 'cpu'
     if use_cuda:
         # empty_cache() / autocast('cuda') 等都作用于"当前设备"（默认 0 号卡）：
         # 不调用 set_device，多卡下显存回收与 autocast 上下文全部落错卡

@@ -31,7 +31,7 @@ WEIGHTS_DIR = ENGINE_DIR / 'weights' / 'SeedVR2-3B'
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device  # noqa: E402
 
 
 def compute_output_dims(w0, h0, resolution):
@@ -102,7 +102,9 @@ def main(args):
 
     # 尊重 UI 高级选项的显卡选择（worker.py --device cuda:N）：
     # 显存策略评估、empty_cache 的"当前设备"语义都必须落到这张卡
-    dev = args.device if str(args.device).startswith('cuda') else 'cuda:0'
+    dev = resolve_device(args.device)
+    if not dev.startswith('cuda'):
+        fail(f'SeedVR2 需要 CUDA 设备（收到 --device {args.device}）')
     torch.cuda.set_device(dev)
     mem = pick_memory_strategy(dev)
     blocks = args.blocks_to_swap if args.blocks_to_swap >= 0 else mem['blocks']
