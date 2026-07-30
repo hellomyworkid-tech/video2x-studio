@@ -3,6 +3,7 @@
 # Usage: powershell -ExecutionPolicy Bypass -File build_video2x.ps1
 
 $ErrorActionPreference = "Stop"
+# 项目目录自动取脚本所在位置，克隆到任意路径均可直接运行
 $ProjectDir = $PSScriptRoot
 
 Write-Host "============================================"
