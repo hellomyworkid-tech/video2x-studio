@@ -84,7 +84,7 @@ def validate_cuda_device(device):
     except ValueError:
         fail(f'无法识别的 CUDA 设备：{device!r}（应为 cuda:0、cuda:1 等形式）')
     n = torch.cuda.device_count()
-    if idx >= n:
+    if idx < 0 or idx >= n:
         fail(f'本机只有 {n} 张 CUDA 卡（cuda:0 ~ cuda:{n - 1}），无法使用 {device}；'
              '请在高级选项的 CUDA 设备中选择有效的显卡')
 
@@ -281,9 +281,14 @@ def main():
         validate_cuda_device(device)  # 索引越界给中文提示，而非原始 CUDA 报错
         torch.cuda.set_device(device)
     fp16 = use_cuda and not args.no_fp16
+    spynet_p = ENGINE_DIR / 'weights' / 'spynet.pth'
+    if not spynet_p.exists():
+        # 商用合规构建会移除 spynet.pth（Max Planck 非商业许可）；
+        # 官方 RealBasicVSR 主权重已内嵌全部 SPyNet 键（实测 124 个），效果一致
+        log('提示：未找到 weights/spynet.pth，SPyNet 改用主权重内嵌键（效果一致）')
     model = load_realbasicvsr(
         ENGINE_DIR / 'weights' / 'realbasicvsr_x4.pth',
-        ENGINE_DIR / 'weights' / 'spynet.pth',
+        spynet_p if spynet_p.exists() else None,
         device=device, fp16=fp16)
     log(f'模型已加载（device={device}, fp16={fp16}）')
 

@@ -37,6 +37,39 @@ Version 6.0.0 is a complete rewrite of this project in C/C++. It:
 
 ![6.4.0-screenshot](https://github.com/user-attachments/assets/9b1cc8a7-2903-4d2c-80a2-8d81f007e45b)
 
+## 🚀 This Branch / 本分支新增功能
+
+This branch extends upstream Video2X 6.x with the following major additions
+(本分支在上游 6.x 基础上新增以下主要功能):
+
+### 🖥️ Video2X Studio desktop application（`ui/`）
+
+A full Windows desktop app (Electron + React) that wraps the C++ core and the
+Python engines: batch queue processing, per-job pause / resume-at-checkpoint /
+resume-after-crash (sharded checkpoints for the flagship engines), open-output-folder
+shortcuts, network-share (NAS) source pre-processing with lossless-remux-then-transcode
+fallback, automatic download of missing models/binaries (with China mirror fallback),
+persistent per-user last configuration, and per-GPU CUDA device selection.
+
+### 🧠 Three Python VSR engines（`engine-python/`）
+
+| Tier 档位 | Engine | Scale | Notes |
+|---|---|---|---|
+| Flagship 旗舰 | **FlashVSR** (OpenImagingLab, Apache 2.0) | 4× | Streaming one-step diffusion VSR; temporal-consistency benchmark; 8 GB+ VRAM |
+| Flagship 旗舰 | **SeedVR2-3B** (ByteDance-Seed, Apache 2.0) | target-resolution | Diffusion VSR; strongest on heavily-compressed/low-quality sources |
+| Mid 中坚 | **RealBasicVSR** (OpenMMLab, Apache 2.0) | 4× | Recurrent VSR, temporally stable, flicker-free |
+
+All three support pause (process freeze), stop-at-checkpoint, and resume
+(`engine-python/worker.py`, `flashvsr_runner.py`, `seedvr2_runner.py`).
+
+### ⛓️ FilterChain & new CLI flags（C++ core）
+
+- **`--denoise`** — FFmpeg-based denoising stage in the new FilterChain (`src/filter_chain.cpp`, `src/filter_ffmpeg_graph.cpp`)
+- **`--stab`** — video stabilization prepass via vidstabdetect/vidstabtransform (`src/stab_prepass.cpp`), runs as a two-pass analyze → transform pipeline
+- **`--hdr`** — SDR→HDR tone mapping (`src/filter_hdr.cpp`, libplacebo-based `src/filter_libplacebo.cpp`)
+- **SPAN** super-resolution model support via ncnn/Vulkan (`src/filter_span.cpp`, `models/span/`)
+- Decoder flush fix and FilterChain composability: denoise/stab/HDR chain freely with any upscaler
+
 ## 🖥️ Hardware Requirements
 
 Your system must meet the minimum hardware requirements below to run Video2X.
@@ -133,18 +166,18 @@ Copyright (C) 2018-2025 K4YT3X and [contributors](https://github.com/k4yt3x/vide
 
 ### Source Code Availability / 源码获取
 
-In compliance with AGPL-3.0 §13, the complete corresponding source code of this
-distribution (including the Video2X Studio desktop application, the Python VSR
-engines, and all local modifications) is available in this repository itself —
-clone or download this git repository to obtain the full source:
+This repository is a **modified branch** of Video2X: it adds the Video2X Studio
+desktop application (`ui/`), three Python VSR engines (`engine-python/`), and
+changes to the C++ core (FilterChain, HDR, VidStab, SPAN, …). In compliance
+with AGPL-3.0 §13, the complete corresponding source of this modified version
+is maintained in this git working copy, with every change committed, and is
+available free of charge from the distributor on request. The upstream,
+unmodified project (without this branch's additions) lives at
+<https://github.com/k4yt3x/video2x>.
 
-```
-git clone https://github.com/k4yt3x/video2x.git
-```
-
-本分支（含 Video2X Studio 桌面程序、Python 超分引擎及全部本地修改）的完整对应源码
-即为本仓库内容。若你拿到的是便携包（win-unpacked），包内附带的 `SOURCE.txt`
-指明了对应的源码获取方式。
+本仓库是 Video2X 的**修改分支**，新增 Studio 桌面程序、Python 超分引擎与 C++ 核心改动。
+依 AGPL-3.0 §13，这些修改的完整对应源码均提交在本 git 工作副本中，可向分发方免费索取；
+便携包内附带的 `SOURCE.txt` 有同样说明。上游原版（不含本分支新增内容）见上述链接。
 
 This project includes or depends on these following projects:
 

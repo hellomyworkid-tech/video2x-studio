@@ -79,6 +79,22 @@
           "!.venv/**",
           "!**/__pycache__/**"
         ]
+      },
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE.txt"
+      },
+      {
+        "from": "../NOTICE",
+        "to": "NOTICE.txt"
+      },
+      {
+        "from": "../WEIGHTS_LICENSES.md",
+        "to": "WEIGHTS_LICENSES.md"
+      },
+      {
+        "from": "../SOURCE.txt",
+        "to": "SOURCE.txt"
       }
     ],
     "directories": {

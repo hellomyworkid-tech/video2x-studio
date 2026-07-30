@@ -70,6 +70,14 @@ def test_validate_cuda_bounds_and_malformed():
     # 合法索引：不抛异常
     validate_cuda_device(f'cuda:{n - 1}')
 
+    # 负索引：-1 在旧代码里绕得过越界判断，落到 set_device 才抛英文 RuntimeError
+    try:
+        validate_cuda_device('cuda:-1')
+    except SystemExit as e:
+        assert e.code == 1, f'负索引退出码应为 1，实际 {e.code}'
+    else:
+        raise AssertionError('cuda:-1 负索引但未触发 fail')
+
     # 越界索引：fail() 打印中文提示并以退出码 1 结束
     try:
         validate_cuda_device(f'cuda:{n}')
