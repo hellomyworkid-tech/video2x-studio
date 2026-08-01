@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added (this branch / 本分支)
 
 - Video2X Studio desktop application (`ui/`, Electron + React): batch queue, pause / resume-at-checkpoint / resume-after-crash with sharded checkpoints, NAS source pre-processing (lossless remux with transcode fallback), automatic model/binary download with mirror fallback, per-GPU CUDA device selection, persistent last-used configuration.
-- Three Python VSR engines (`engine-python/`): FlashVSR (flagship, 4×), SeedVR2-3B (flagship, target-resolution), RealBasicVSR (mid-tier, 4×), all with pause/stop-at-checkpoint/resume support.
+- Two Python VSR engines (`engine-python/`): SeedVR2-3B (target-resolution) and RealBasicVSR (4×), both with pause/stop-at-checkpoint/resume support.
 - FilterChain architecture in the C++ core (`src/filter_chain.cpp`): composable filter stages.
 - `--denoise` CLI option: FFmpeg-based denoising stage.
 - `--stab` CLI option: two-pass video stabilization via vidstabdetect/vidstabtransform (`src/stab_prepass.cpp`).

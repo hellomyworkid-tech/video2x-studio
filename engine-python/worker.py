@@ -108,8 +108,7 @@ def start_decode_watchdog(dec_proc, warn_after=60, kill_after=300, suspend_flag=
     秒判定为挂死：强杀解码/编码进程并以退出码 3 结束。
     典型场景：网络源解码挂死、异常封装 seek 卡死、编码端磁盘/NAS 写入停滞
     （编码器停止消费 → 管道反压 → 写入侧永久阻塞，此路径仅本看门狗覆盖）。
-    RealBasicVSR/SeedVR2 分片与检查点已落盘，重新启动可从断点续跑；
-    FlashVSR 则需整段重来。
+    RealBasicVSR/SeedVR2 分片与检查点已落盘，重新启动可从断点续跑。
     suspend_flag：进程挂起旗标文件（bridge 挂起进程树前写入）。旗标存在时
     豁免计时并重置心跳，避免按墙钟把"真暂停"误判为挂死。
     返回 (begin, end, stop)：read/write 前后各调一次，结束后 stop。
@@ -227,7 +226,7 @@ def fmt_hms(seconds):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--model', required=True, choices=['realbasicvsr', 'flashvsr', 'seedvr2'])
+    ap.add_argument('--model', required=True, choices=['realbasicvsr', 'seedvr2'])
     ap.add_argument('-i', '--input', required=True)
     ap.add_argument('-o', '--output', required=True)
     ap.add_argument('--codec', default='libx264')
@@ -237,7 +236,7 @@ def main():
     ap.add_argument('--tile', type=int, default=-1,
                     help='空间分块边长（px）；0=强制整帧不分块，-1(默认)=按显存自适应')
     ap.add_argument('--overlap', type=int, default=8, help='分块重叠长度（帧）')
-    ap.add_argument('--segment', type=int, default=200, help='FlashVSR 分段帧数（0=整段）')
+    ap.add_argument('--segment', type=int, default=121, help='SeedVR2 内部时序段帧数')
     ap.add_argument('--seg-len', type=int, default=240, help='断点续跑宏分片长度（帧）')
     ap.add_argument('--resolution', type=int, default=0, help='SeedVR2 目标短边像素（0=输入短边×4）')
     ap.add_argument('--batch-size', type=int, default=5, help='SeedVR2 内部批大小（4n+1）')
@@ -250,16 +249,8 @@ def main():
     ap.add_argument('--debug', action='store_true', help='引擎调试日志')
     args = ap.parse_args()
 
-    if args.model == 'flashvsr':
-        sys.path.insert(0, str(ENGINE_DIR))
-        from vsr_models.flashvsr_runner import main as flash_main
-        flash_main(args)
-        return
-
     if args.model == 'seedvr2':
         sys.path.insert(0, str(ENGINE_DIR))
-        if args.segment == 200:
-            args.segment = 121  # worker 的 200 是 FlashVSR 默认；SeedVR2 内部时序段用 121
         if args.seg_len == 240:
             args.seg_len = 120  # SeedVR2 极慢（约 0.4fps）：检查点加密到 120 帧，
                                 # 暂停/断点续跑粒度从约 10 分钟降到约 5 分钟

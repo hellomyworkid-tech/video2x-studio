@@ -7,10 +7,6 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights")
 FILES = [
     "realbasicvsr_x4.pth",
     "spynet.pth",
-    "FlashVSR-v1.1/LQ_proj_in.ckpt",
-    "FlashVSR-v1.1/TCDecoder.ckpt",
-    "FlashVSR-v1.1/Wan2.1_VAE.pth",
-    "FlashVSR-v1.1/diffusion_pytorch_model_streaming_dmd.safetensors",
     "SeedVR2-3B/seedvr2_ema_3b_fp8_e4m3fn.safetensors",
     "SeedVR2-3B/ema_vae_fp16.safetensors",
 ]

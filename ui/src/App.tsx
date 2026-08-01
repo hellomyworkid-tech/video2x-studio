@@ -50,7 +50,7 @@ export default function App() {
         [jobs]
     );
 
-    const pyReady = !!(pyEngine && pyEngine.exeExists && (pyEngine.realbasicvsrWeights || pyEngine.flashvsrWeights || pyEngine.seedvr2Weights));
+    const pyReady = !!(pyEngine && pyEngine.exeExists && (pyEngine.realbasicvsrWeights || pyEngine.seedvr2Weights));
 
     return (
         <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">

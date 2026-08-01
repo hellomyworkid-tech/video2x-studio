@@ -66,7 +66,7 @@ function loadSavedConfig(): JobRequest | null {
 const PROCESSOR_NAMES: Record<string, string> = {
     lanczos: 'Lanczos 缩放', libplacebo: 'libplacebo', realesrgan: 'Real-ESRGAN',
     realcugan: 'Real-CUGAN', rife: 'RIFE 补帧', span: 'SPAN',
-    realbasicvsr: 'RealBasicVSR', flashvsr: 'FlashVSR', seedvr2: 'SeedVR2',
+    realbasicvsr: 'RealBasicVSR', seedvr2: 'SeedVR2',
 };
 
 /** 把隐藏在标签页里的关键设置浓缩成一句话摘要 */
@@ -282,7 +282,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, on
                                 (isPython ? (
                                     <NotApplicableCard
                                         title="增强阶段不适用于旗舰引擎"
-                                        desc="RealBasicVSR / FlashVSR 内置时序清洁与重建模块，防抖、滤镜降噪、HDR 转制等 FFmpeg 级增强仅对 ncnn 引擎（libplacebo / Real-ESRGAN / Real-CUGAN / RIFE / SPAN）生效。"
+                                        desc="RealBasicVSR / SeedVR2 内置时序清洁与重建模块，防抖、滤镜降噪、HDR 转制等 FFmpeg 级增强仅对 ncnn 引擎（libplacebo / Real-ESRGAN / Real-CUGAN / RIFE / SPAN）生效。"
                                     />
                                 ) : (
                                     <EnhanceSection req={req} onChange={patch} bare />

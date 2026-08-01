@@ -47,7 +47,7 @@ const CLI_PATH =
     process.env.VIDEO2X_CLI ||
     path.join(PROJECT_ROOT, 'build-desktop', 'Release', 'video2x.exe');
 
-// Python sidecar (PyTorch flagship engines: RealBasicVSR / FlashVSR)
+// Python sidecar (PyTorch engines: RealBasicVSR / SeedVR2)
 // 优先使用随包携带的独立运行时 engine-python/python（便携版）；
 // 不存在时回退到开发环境的 .venv
 const PYTHON_BUNDLED = path.join(PROJECT_ROOT, 'engine-python', 'python', 'python.exe');
@@ -63,7 +63,6 @@ const SUSPEND_PS1 = path.join(__dirname, 'suspend_tree.ps1');
 const PS_EXE = 'powershell.exe';
 const PY_WEIGHTS = {
     realbasicvsr: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'realbasicvsr_x4.pth'),
-    flashvsr: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'FlashVSR-v1.1', 'diffusion_pytorch_model_streaming_dmd.safetensors'),
     seedvr2: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'SeedVR2-3B', 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'),
 };
 
@@ -71,7 +70,6 @@ function pythonEngineStatus() {
     return {
         exeExists: fs.existsSync(PYTHON_EXE),
         realbasicvsrWeights: fs.existsSync(PY_WEIGHTS.realbasicvsr),
-        flashvsrWeights: fs.existsSync(PY_WEIGHTS.flashvsr),
         seedvr2Weights: fs.existsSync(PY_WEIGHTS.seedvr2),
     };
 }
@@ -99,7 +97,6 @@ const VIDEO_EXTS = new Set([
 // ---------------------------------------------------------------------------
 const HF = 'https://huggingface.co';
 const HF_MIRROR = 'https://hf-mirror.com';
-const FLASHVSR_REPO = '/JunhaoZhuang/FlashVSR-v1.1/resolve/main/';
 const RBVSR_REPO = '/akhaliq/RealBasicVSR_x4/resolve/main/RealBasicVSR_x4.pth';
 const SEEDVR2_REPO = '/numz/SeedVR2_comfyUI/resolve/main/';
 
@@ -125,44 +122,6 @@ const ASSETS = [
                 sha256: null,
                 verify: 'load',
                 urls: [HF_MIRROR + RBVSR_REPO, HF + RBVSR_REPO],
-            },
-        ],
-    },
-    {
-        id: 'flashvsr',
-        name: 'FlashVSR v1.1 引擎权重',
-        files: [
-            {
-                rel: path.join('engine-python', 'weights', 'FlashVSR-v1.1', 'diffusion_pytorch_model_streaming_dmd.safetensors'),
-                size: 5676070392,
-                sha256: 'bd28180edcf3446c028e32fc6b731a80bf7e4da2ab4caac3186b9499964d37be',
-                verify: 'hash',
-                urls: [HF_MIRROR + FLASHVSR_REPO + 'diffusion_pytorch_model_streaming_dmd.safetensors',
-                       HF + FLASHVSR_REPO + 'diffusion_pytorch_model_streaming_dmd.safetensors'],
-            },
-            {
-                rel: path.join('engine-python', 'weights', 'FlashVSR-v1.1', 'LQ_proj_in.ckpt'),
-                size: 575694948,
-                sha256: 'd6d011cdaaba6a52645086caa08fa04124e746f6ca568140a24007591142bfd2',
-                verify: 'hash',
-                urls: [HF_MIRROR + FLASHVSR_REPO + 'LQ_proj_in.ckpt',
-                       HF + FLASHVSR_REPO + 'LQ_proj_in.ckpt'],
-            },
-            {
-                rel: path.join('engine-python', 'weights', 'FlashVSR-v1.1', 'TCDecoder.ckpt'),
-                size: 189018333,
-                sha256: 'e224bdcf2f52745cbf4d393ff5374c2ba09e90285d5d19062d2bf63b915b6161',
-                verify: 'hash',
-                urls: [HF_MIRROR + FLASHVSR_REPO + 'TCDecoder.ckpt',
-                       HF + FLASHVSR_REPO + 'TCDecoder.ckpt'],
-            },
-            {
-                rel: path.join('engine-python', 'weights', 'FlashVSR-v1.1', 'Wan2.1_VAE.pth'),
-                size: 507609880,
-                sha256: '38071ab59bd94681c686fa51d75a1968f64e470262043be31f7a094e442fd981',
-                verify: 'hash',
-                urls: [HF_MIRROR + FLASHVSR_REPO + 'Wan2.1_VAE.pth',
-                       HF + FLASHVSR_REPO + 'Wan2.1_VAE.pth'],
             },
         ],
     },
@@ -1541,15 +1500,7 @@ const server = http.createServer(async (req, res) => {
                 });
             }
             const frames = probeInfo.frames;
-            if (model === 'flashvsr') {
-                const hours = frames / 0.6 / 3600;
-                if (hours > 1) {
-                    warnings.push({ level: 'warn', text: `FlashVSR 吞吐约 0.6 fps：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。长视频建议改用 Real-ESRGAN / Real-CUGAN，或先剪辑分段。` });
-                }
-                if (probeInfo.width * probeInfo.height >= 1920 * 1080) {
-                    warnings.push({ level: 'warn', text: '输入 ≥1080p：FlashVSR 4x 后输出超 4K，显存与时间开销极大，建议改用 RealBasicVSR 或 NCNN 引擎。' });
-                }
-            } else if (model === 'realbasicvsr') {
+            if (model === 'realbasicvsr') {
                 // 吞吐随输入尺寸差一个数量级：RTX 5070 Ti 端到端实测 720x1280 约 1.4 fps，
                 // 小尺寸（各边 ≤512px）才有 ~8 fps。原先固定按 15 fps 估算，
                 // 对竖屏 720p 素材低估约 10 倍。
@@ -1567,7 +1518,7 @@ const server = http.createServer(async (req, res) => {
             } else if (model === 'seedvr2') {
                 const hours = frames / 0.4 / 3600;
                 if (hours > 0.5) {
-                    warnings.push({ level: 'warn', text: `SeedVR2-3B 是画质旗舰引擎，吞吐约 0.4 fps（16GB 显存实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；赶时间建议改用 FlashVSR 或 NCNN 引擎。` });
+                    warnings.push({ level: 'warn', text: `SeedVR2-3B 是画质旗舰引擎，吞吐约 0.4 fps（16GB 显存实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；赶时间建议改用 SPAN / Real-ESRGAN 等 NCNN 引擎。` });
                 }
                 if (probeInfo.width * probeInfo.height >= 1920 * 1080) {
                     warnings.push({ level: 'warn', text: '输入 ≥1080p：SeedVR2 默认短边 4x 后输出超 4K，显存与时间开销极大，建议在高级选项中调低目标短边分辨率。' });

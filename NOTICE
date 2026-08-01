@@ -63,15 +63,3 @@ The source code can be found at https://github.com/ByteDance-Seed/SeedVR.
 The vendored inference implementation is ComfyUI-SeedVR2_VideoUpscaler,
 also available under the Apache License 2.0.
 The source code can be found at https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.
-
-This product depends on FlashVSR (OpenImagingLab), which is available
-under the Apache License 2.0.
-The source code can be found at https://github.com/OpenImagingLab/FlashVSR.
-
-This product depends on DiffSynth-Studio (ModelScope community), which is
-available under the Apache License 2.0.
-The source code can be found at https://github.com/modelscope/DiffSynth-Studio.
-
-The FlashVSR weights bundle includes the Wan2.1 VAE (Alibaba Wan2.1),
-which is available under the Apache License 2.0.
-The source code can be found at https://github.com/Wan-Video/Wan2.1.

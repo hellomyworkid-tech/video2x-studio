@@ -22,10 +22,10 @@
 
 **① 旗舰级画质引擎，专治"没救"的片源**
 
-内置两套扩散模型旗舰引擎：字节跳动开源的 **SeedVR2-3B**——重度压缩、低码率、
-实拍老片的最强修复力；以及 **FlashVSR**——流式架构的时序一致性标杆，长视频不闪不跳。
-中坚力量覆盖全场景：RealBasicVSR（稳定无闪烁）、Real-ESRGAN / Real-CUGAN（实拍与动漫）、
-SPAN、Anime4K，外加 RIFE 补帧，最高把 24 帧老片顺成丝滑高帧率。
+内置字节跳动开源的 **SeedVR2-3B** 扩散模型引擎——重度压缩、低码率、实拍老片的
+最强修复力；以及 **RealBasicVSR**——双向循环传播，时序稳定无闪烁。
+经典档覆盖全场景：Real-ESRGAN / Real-CUGAN（实拍与动漫）、SPAN、Anime4K、
+Lanczos 纯缩放，外加 RIFE 补帧，最高把 24 帧老片顺成丝滑高帧率。
 
 **② 挂上队列就不用管**
 
@@ -52,9 +52,9 @@ Windows 便携包解压即跑：Python、CUDA 运行时、FFmpeg、模型全部�
 | 档位 | 引擎 | 放大 | 适合片源 | 硬件建议 |
 |---|---|---|---|---|
 | 旗舰 | SeedVR2-3B（字节跳动，Apache 2.0） | 目标分辨率 | 重度压缩 / 低码率 / 老片实拍 | 大显存显卡 |
-| 旗舰 | FlashVSR（Apache 2.0） | 4× | 长视频 / 讲究时序一致 | 8 GB+ 显存 |
-| 中坚 | RealBasicVSR（Apache 2.0） | 4× | 实拍视频，稳定无闪烁 | 主流显卡 |
+| 重建 | RealBasicVSR（Apache 2.0） | 4× | 实拍老片，稳定无闪烁 | 主流显卡 |
 | 经典 | Real-ESRGAN / Real-CUGAN / SPAN | 2×/3×/4× | 实拍与动漫全场景 | 入门显卡即可 |
+| 无模型 | Lanczos 纯缩放 | 2×/3×/4× 或指定分辨率 | 高码率清晰源；零伪影 | 无需显卡 |
 | 补帧 | RIFE（14 个版本可选） | — | 任意，提升到高帧率 | 入门显卡即可 |
 
 降噪、防抖、SDR→HDR 可与任意超分引擎自由串联成流水线（FilterChain）。
@@ -106,16 +106,15 @@ shortcuts, network-share (NAS) source pre-processing with lossless-remux-then-tr
 fallback, automatic download of missing models/binaries (with China mirror fallback),
 persistent per-user last configuration, and per-GPU CUDA device selection.
 
-### 🧠 Three Python VSR engines（`engine-python/`）
+### 🧠 Two Python VSR engines（`engine-python/`）
 
 | Tier 档位 | Engine | Scale | Notes |
 |---|---|---|---|
-| Flagship 旗舰 | **FlashVSR** (OpenImagingLab, Apache 2.0) | 4× | Streaming one-step diffusion VSR; temporal-consistency benchmark; 8 GB+ VRAM |
 | Flagship 旗舰 | **SeedVR2-3B** (ByteDance-Seed, Apache 2.0) | target-resolution | Diffusion VSR; strongest on heavily-compressed/low-quality sources |
 | Mid 中坚 | **RealBasicVSR** (OpenMMLab, Apache 2.0) | 4× | Recurrent VSR, temporally stable, flicker-free |
 
-All three support pause (process freeze), stop-at-checkpoint, and resume
-(`engine-python/worker.py`, `flashvsr_runner.py`, `seedvr2_runner.py`).
+Both support pause (process freeze), stop-at-checkpoint, and resume
+(`engine-python/worker.py`, `seedvr2_runner.py`).
 
 ### ⛓️ FilterChain & new CLI flags（C++ core）
 
@@ -249,9 +248,6 @@ This project includes or depends on these following projects:
 | [open-mmlab/mmagic (MMEditing)](https://github.com/open-mmlab/mmagic)                 | Apache 2.0      |
 | [ByteDance-Seed/SeedVR (SeedVR2)](https://github.com/ByteDance-Seed/SeedVR)           | Apache 2.0      |
 | [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | Apache 2.0 |
-| [OpenImagingLab/FlashVSR](https://github.com/OpenImagingLab/FlashVSR)                 | Apache 2.0      |
-| [modelscope/DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio)         | Apache 2.0      |
-| [Wan-Video/Wan2.1 (VAE)](https://github.com/Wan-Video/Wan2.1)                         | Apache 2.0      |
 | [anuragranj/spynet](https://github.com/anuragranj/spynet)（仅权重，经 OpenMMLab 分发） | 非商业/科研用途 |
 
 More licensing information can be found in the [NOTICE](NOTICE) file.

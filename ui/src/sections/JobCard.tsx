@@ -37,7 +37,7 @@ function summarizeArgs(args: string[]): string {
     const mi = args.indexOf('--model');
     if (mi >= 0) {
         const model = args[mi + 1];
-        parts.push(model === 'realbasicvsr' ? 'RealBasicVSR ×4' : model === 'flashvsr' ? 'FlashVSR ×4' : model === 'seedvr2' ? 'SeedVR2 短边×4' : model);
+        parts.push(model === 'realbasicvsr' ? 'RealBasicVSR ×4' : model === 'seedvr2' ? 'SeedVR2 短边×4' : model);
         const ri2 = args.indexOf('--resolution');
         if (ri2 >= 0 && args[ri2 + 1] !== '0') parts.push(`短边 ${args[ri2 + 1]}p`);
         const ci = args.indexOf('--codec');

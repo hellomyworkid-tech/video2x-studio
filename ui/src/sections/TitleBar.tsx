@@ -31,7 +31,7 @@ function EngineBadge({ ok, label, icon: Icon }: { ok: boolean | null; label: str
 
 export default function TitleBar({ devices, cliReady, pyEngine }: Props) {
     const gpu = devices.length > 0 ? devices[0].name : null;
-    const pyOk = pyEngine === null ? null : pyEngine.exeExists && (pyEngine.realbasicvsrWeights || pyEngine.flashvsrWeights || pyEngine.seedvr2Weights);
+    const pyOk = pyEngine === null ? null : pyEngine.exeExists && (pyEngine.realbasicvsrWeights || pyEngine.seedvr2Weights);
     return (
         <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border/70 bg-card/40 px-4 backdrop-blur">
             <div className="flex h-6.5 w-6.5 h-[26px] w-[26px] items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-violet-500 shadow shadow-cyan-500/25">
@@ -50,7 +50,7 @@ export default function TitleBar({ devices, cliReady, pyEngine }: Props) {
                     </span>
                 )}
                 <EngineBadge ok={cliReady} label="ncnn 引擎" icon={Zap} />
-                <EngineBadge ok={pyOk} label="PyTorch 旗舰" icon={Flame} />
+                <EngineBadge ok={pyOk} label="PyTorch 重建档" icon={Flame} />
             </div>
         </header>
     );

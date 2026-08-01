@@ -2,7 +2,7 @@
 
 export type ProcessorKind =
     | 'lanczos' | 'libplacebo' | 'realesrgan' | 'realcugan' | 'rife' | 'span'
-    | 'realbasicvsr' | 'flashvsr' | 'seedvr2';
+    | 'realbasicvsr' | 'seedvr2';
 
 export type EngineKind = 'cli' | 'python';
 
@@ -27,8 +27,6 @@ export interface ProcessorConfig {
     // interpolation
     frameRateMul: number;
     sceneThresh: number;
-    // FlashVSR
-    flashvsrSegment: number;
     // SeedVR2（0 = 输入短边×4）
     seedvr2Resolution: number;
 }
@@ -119,7 +117,6 @@ export interface Job {
 export interface PythonEngineStatus {
     exeExists: boolean;
     realbasicvsrWeights: boolean;
-    flashvsrWeights: boolean;
     seedvr2Weights: boolean;
 }
 

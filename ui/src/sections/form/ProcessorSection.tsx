@@ -1,4 +1,4 @@
-import { Crown, Flame, Gauge, Gem, ImagePlus, Layers, Scaling, Sparkles, Timer } from 'lucide-react';
+import { Crown, Gauge, Gem, ImagePlus, Layers, Scaling, Sparkles, Timer } from 'lucide-react';
 import {
     capsFor, CUGAN_NOISE_LABELS, normalizeProcessor,
     REALCUGAN_MODELS, REALESRGAN_MODELS, RIFE_MODELS, SHADERS, SPAN_MODELS,
@@ -32,7 +32,6 @@ const PROCESSORS: {
     { kind: 'realcugan', name: 'Real-CUGAN', tagline: '动漫超分王者 · 结构保持最佳', icon: Layers, accent: 'from-fuchsia-500/20 to-fuchsia-500/5' },
     { kind: 'rife', name: 'RIFE 补帧', tagline: '帧率倍增 · 运动更丝滑', icon: Timer, accent: 'from-amber-500/20 to-amber-500/5' },
     { kind: 'realbasicvsr', name: 'RealBasicVSR', tagline: '重建档 · 时域稳定无闪烁 · 仅适合退化源', icon: Crown, accent: 'from-amber-400/20 to-orange-500/5', engine: 'pytorch' },
-    { kind: 'flashvsr', name: 'FlashVSR', tagline: '重建档 · 扩散模型 · 重度压缩/低质源最强', icon: Flame, accent: 'from-rose-500/20 to-red-500/5', engine: 'pytorch' },
     { kind: 'seedvr2', name: 'SeedVR2', tagline: '重建档 · 退化源画质天花板 · 极慢', icon: Gem, accent: 'from-indigo-500/20 to-indigo-500/5', engine: 'pytorch' },
 ];
 
@@ -60,7 +59,7 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
     return (
         <SectionCard step="02" title="处理器" desc="选择核心引擎与模型——决定画质/速度的基本盘" bare={bare}>
             {/* processor cards：单行紧凑排列，说明文字进悬停提示 */}
-            <div className="mb-3 grid grid-cols-9 gap-1.5">
+            <div className="mb-3 grid grid-cols-8 gap-1.5">
                 {PROCESSORS.map((proc) => {
                     const active = p.kind === proc.kind;
                     return (
@@ -335,31 +334,6 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                     </div>
                 )}
 
-                {p.kind === 'flashvsr' && (
-                    <div className="flex flex-wrap items-end gap-3">
-                        <div className="w-[210px]">
-                            <Label className="mb-1.5 block text-xs text-muted-foreground">缩放倍数</Label>
-                            <div className="flex h-9 items-center gap-1.5 rounded-md border border-rose-400/30 bg-rose-500/10 px-3 text-xs font-semibold text-rose-200">
-                                ×4
-                                <span className="text-[10px] font-normal text-muted-foreground">扩散模型固定 4 倍</span>
-                            </div>
-                        </div>
-                        <div className="w-[190px]">
-                            <Label className="mb-1.5 block text-xs text-muted-foreground">分段长度（帧）</Label>
-                            <Input
-                                type="number" min={32} max={600} step={4}
-                                value={p.flashvsrSegment}
-                                onChange={(e) => setP({ flashvsrSegment: Math.max(32, Number(e.target.value) || 200) })}
-                                className="h-9 bg-input/60 text-xs"
-                                title="显存足够可加大以减少接缝；16GB 显存建议 200"
-                            />
-                        </div>
-                        <div className="flex h-9 items-center rounded-md border border-border/60 bg-secondary/30 px-3 text-[11px] text-muted-foreground">
-                            输出按 128 对齐中心裁切 · 首次运行需加载约 11 GB 权重
-                        </div>
-                    </div>
-                )}
-
                 {p.kind === 'seedvr2' && (
                     <div className="flex flex-wrap items-end gap-3">
                         <div className="w-[210px]">
@@ -388,10 +362,9 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                     {p.kind === 'rife' && '补帧不改变分辨率；场景切换阈值越低检测越敏感（20 表示 20% 差异即判定切换），避免转场处产生伪影。可与 HDR 同用。'}
                     {p.kind === 'span' && 'SPAN 仅支持 2× / 4×，模型体积最小、速度快（720p 输入实测约 12 fps）。偏保真而非"再生"细节，实测在真人实拍素材上重建保真度为全部可选模型最高、且是唯一优于纯 Lanczos 缩放的模型——人脸/浅景深/硬字幕场景不易产生塑料感与振铃，是实拍内容的首选。'}
                     {p.kind === 'realbasicvsr' && 'RealBasicVSR（Apache-2.0）通过双向循环传播 + SPyNet 光流对齐消除帧间闪烁，时序一致性好。但代价很高：720×1280 输入端到端实测约 1.4 fps，约为 Real-ESRGAN 4× 的 1/6、SPAN 2× 的 1/8。显存够时走整帧推理（画质最佳）；输入过大放不下会自动退化为空间分块，实测画质再降约 1.6 dB。仅在源确有明显退化（低码率、噪点、糊）时才值得；清晰源上收益很小。由独立 PyTorch 后端执行，仅编码器与 CRF 可调。'}
-                    {p.kind === 'flashvsr' && 'FlashVSR（阿里开源）基于 Wan2.1 扩散先验，对重度压缩、噪点、低码率源的修复能力目前最强；速度很慢（0.6 fps 量级），适合短而精的救片场景，不适合整片批量。分段越长接缝越少但显存占用越高；16 GB 显存建议保持 200。清晰源上请勿使用——无细节可重建时扩散模型只会改写原貌。'}
                     {p.kind === 'seedvr2' && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度 0.4 fps 量级（最慢档），支持断点续跑可分多次完成；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
                 </p>
-                {(p.kind === 'realbasicvsr' || p.kind === 'flashvsr' || p.kind === 'seedvr2') && (
+                {(p.kind === 'realbasicvsr' || p.kind === 'seedvr2') && (
                     <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-200/90">
                         重建档引擎是为<strong>严重退化</strong>素材设计的（老片、极低码率、强压缩、模糊）。
                         若源本身码率高、画面干净，它们不仅慢几十倍，画质也可能不如 Lanczos / SPAN——

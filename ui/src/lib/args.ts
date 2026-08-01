@@ -3,7 +3,7 @@
 
 import type { EngineKind, JobRequest, ProcessorKind } from '@/types';
 
-export const PYTHON_PROCESSORS: ProcessorKind[] = ['realbasicvsr', 'flashvsr', 'seedvr2'];
+export const PYTHON_PROCESSORS: ProcessorKind[] = ['realbasicvsr', 'seedvr2'];
 
 /** 决定一个处理器由哪条引擎链路执行：ncnn CLI 还是 Python sidecar */
 export function engineFor(kind: ProcessorKind): EngineKind {
@@ -20,9 +20,6 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
         // 旗舰引擎用 CUDA 编号空间（不可复用 Vulkan 的 deviceIndex，核显机上会错位）；
         // 旧持久化配置无此字段时回落 0
         '--device', `cuda:${req.advanced.cudaDeviceIndex ?? 0}`];
-    if (p.kind === 'flashvsr') {
-        args.push('--segment', String(p.flashvsrSegment));
-    }
     if (p.kind === 'seedvr2') {
         args.push('--resolution', String(p.seedvr2Resolution > 0 ? p.seedvr2Resolution : 0));
     }
@@ -140,7 +137,6 @@ export function defaultJobRequest(): JobRequest {
             noiseLevel: -1,
             frameRateMul: 2,
             sceneThresh: 100,
-            flashvsrSegment: 200,
             seedvr2Resolution: 0,
         },
         enhance: {
@@ -234,8 +230,7 @@ export const SPAN_CAPS: SrCaps = { scales: [2, 4], noises: () => null, defaultNo
 // Lanczos：纯重采样，无模型无权重，任意整数倍率（也可切到指定分辨率模式）
 export const LANCZOS_CAPS: SrCaps = { scales: [2, 3, 4], noises: () => null, defaultNoise: -1 };
 
-// 旗舰档（Python sidecar）：固定 x4，无降噪档位（RealBasicVSR 内置时序清洁模块；
-// FlashVSR 输出为 128 对齐的中心裁切，UI 单独说明）
+// 重建档（Python sidecar）：固定 x4，无降噪档位（RealBasicVSR 内置时序清洁模块）
 export const FLAGSHIP_CAPS: SrCaps = { scales: [4], noises: () => null, defaultNoise: -1 };
 
 type ProcessorCfg = JobRequest['processor'];
@@ -246,7 +241,7 @@ export function capsFor(p: ProcessorCfg): SrCaps | null {
     if (p.kind === 'span') return SPAN_CAPS;
     // lanczos 在倍率模式下才受倍率钳制；指定分辨率模式用显式宽高
     if (p.kind === 'lanczos') return p.sizeMode === 'explicit' ? null : LANCZOS_CAPS;
-    if (p.kind === 'realbasicvsr' || p.kind === 'flashvsr' || p.kind === 'seedvr2') return FLAGSHIP_CAPS;
+    if (p.kind === 'realbasicvsr' || p.kind === 'seedvr2') return FLAGSHIP_CAPS;
     return null; // libplacebo 用显式宽高；rife 无缩放/降噪概念
 }
 
