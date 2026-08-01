@@ -182,6 +182,9 @@ def main(args):
 
     def on_stream_iter(done, total):
         # 每次流式迭代 ≈ 产出 8 帧
+        # 必须喂看门狗：wd_beat 只在 pipe() 调用前拍一次，而大分辨率下单次
+        # 流式迭代可能远超 kill_after，不在这里续命会把"正在推进"误杀为挂死
+        wd_beat()
         est = min(TOTAL, written_base[0] + done * 8)
         elapsed = time.time() - t0
         fps_now = est / elapsed if elapsed > 0 else 0.0
