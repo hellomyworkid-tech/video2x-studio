@@ -64,9 +64,9 @@ function loadSavedConfig(): JobRequest | null {
 }
 
 const PROCESSOR_NAMES: Record<string, string> = {
-    libplacebo: 'libplacebo', realesrgan: 'Real-ESRGAN', realcugan: 'Real-CUGAN',
-    rife: 'RIFE 补帧', span: 'SPAN', realbasicvsr: 'RealBasicVSR', flashvsr: 'FlashVSR',
-    seedvr2: 'SeedVR2',
+    lanczos: 'Lanczos 缩放', libplacebo: 'libplacebo', realesrgan: 'Real-ESRGAN',
+    realcugan: 'Real-CUGAN', rife: 'RIFE 补帧', span: 'SPAN',
+    realbasicvsr: 'RealBasicVSR', flashvsr: 'FlashVSR', seedvr2: 'SeedVR2',
 };
 
 /** 把隐藏在标签页里的关键设置浓缩成一句话摘要 */
@@ -79,6 +79,7 @@ function summarizeConfig(req: JobRequest): string {
     else if (p.kind === 'span') procLabel += ` ×${p.scaleFactor}`;
     else if (p.kind === 'rife') procLabel += ` · ${p.rifeModel} ×${p.frameRateMul}`;
     else if (p.kind === 'libplacebo') procLabel += ` · ${p.width}×${p.height}`;
+    else if (p.kind === 'lanczos') procLabel += p.sizeMode === 'explicit' ? ` · ${p.width}×${p.height}` : ` ×${p.scaleFactor}`;
     else if (p.kind === 'seedvr2') procLabel += p.seedvr2Resolution > 0 ? ` · 短边 ${p.seedvr2Resolution}p` : ' · 短边 ×4';
     else procLabel += ' ×4';
     parts.push(procLabel);
@@ -124,6 +125,8 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, on
         req.files.length > 0 &&
         req.outputDir.trim().length > 0 &&
         !(req.processor.kind === 'libplacebo' && (req.processor.width <= 0 || req.processor.height <= 0)) &&
+        !(req.processor.kind === 'lanczos' && req.processor.sizeMode === 'explicit'
+            && (req.processor.width <= 0 || req.processor.height <= 0)) &&
         !(req.encoder.codec === 'custom' && req.encoder.customCodec.trim() === '');
 
     const previewCmd = useMemo(() => {

@@ -240,8 +240,17 @@ void FilterFFmpegGraph::get_output_dimensions(
     int& width,
     int& height
 ) const {
-    width = proc_cfg.width > 0 ? proc_cfg.width : in_width;
-    height = proc_cfg.height > 0 ? proc_cfg.height : in_height;
+    if (proc_cfg.width > 0 && proc_cfg.height > 0) {
+        width = proc_cfg.width;
+        height = proc_cfg.height;
+    } else if (proc_cfg.scaling_factor > 0) {
+        // Rescaling graph (e.g. lanczos) expressed as a scale factor
+        width = in_width * proc_cfg.scaling_factor;
+        height = in_height * proc_cfg.scaling_factor;
+    } else {
+        width = in_width;
+        height = in_height;
+    }
 }
 
 }  // namespace processors

@@ -248,8 +248,10 @@ def main(args):
         # seek_frame=0 时不带 -ss：无索引的损坏文件带 -ss 会 seek 到虚空，整段 0 帧
         seek_frame = max(0, seg_start - 8)
         dec_pre = [] if seek_frame == 0 else ['-ss', f'{seek_frame / FPS:.6f}']
+        # -frames:v 限定解码帧数，避免读够后关管道导致解码器刷 Broken pipe 报错
         dec_cmd = [str(FFMPEG), '-hide_banner', '-loglevel', 'error',
                    *dec_pre, '-i', args.input,
+                   '-frames:v', str(seg_end - seek_frame),
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24',

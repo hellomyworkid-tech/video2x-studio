@@ -83,7 +83,7 @@ int parse_args(
             ("output,o", PO_STR_VALUE<video2x::fsutils::StringType>()->required(),
                 "Output video file path")
             ("processor,p", PO_STR_VALUE<video2x::fsutils::StringType>()->required(),
-                "Processor to use (libplacebo, realesrgan, realcugan, rife, span)")
+                "Processor to use (lanczos, libplacebo, realesrgan, realcugan, rife, span)")
             ("hwaccel,a", PO_STR_VALUE<video2x::fsutils::StringType>()
                 ->default_value(STR("none"), "none"), "Hardware acceleration method (decoding)")
             ("device,d", po::value<uint32_t>(&arguments.vk_device_index)->default_value(0),
@@ -318,7 +318,11 @@ int parse_args(
         if (vm.count("processor")) {
             video2x::fsutils::StringType processor_type_str =
                 vm["processor"].as<video2x::fsutils::StringType>();
-            if (processor_type_str == STR("libplacebo")) {
+            if (processor_type_str == STR("lanczos")) {
+                // Plain high-quality rescale, no neural network. Reuses the generic
+                // FFmpeg filter-graph stage; the graph itself is built further below.
+                proc_cfg.processor_type = video2x::processors::ProcessorType::FFmpegGraph;
+            } else if (processor_type_str == STR("libplacebo")) {
                 proc_cfg.processor_type = video2x::processors::ProcessorType::Libplacebo;
             } else if (processor_type_str == STR("realesrgan")) {
                 proc_cfg.processor_type = video2x::processors::ProcessorType::RealESRGAN;
@@ -409,6 +413,29 @@ int parse_args(
 
         // Parse processor-specific configurations
         switch (proc_cfg.processor_type) {
+            case video2x::processors::ProcessorType::FFmpegGraph: {
+                // Lanczos rescale: no model, no VRAM, near-instant. Accepts either an
+                // explicit output size (-w/-h) or a scale factor (-s).
+                video2x::processors::FFmpegGraphConfig graph_config;
+                if (proc_cfg.width > 0 && proc_cfg.height > 0) {
+                    graph_config.graph_desc = "scale=" + std::to_string(proc_cfg.width) + ":" +
+                                              std::to_string(proc_cfg.height) + ":flags=lanczos";
+                } else if (proc_cfg.scaling_factor > 0) {
+                    // iw/ih are evaluated by the scale filter at runtime; the encoder is
+                    // sized from the same factor by FilterChain::compute_output_dimensions
+                    const std::string factor = std::to_string(proc_cfg.scaling_factor);
+                    graph_config.graph_desc =
+                        "scale=iw*" + factor + ":ih*" + factor + ":flags=lanczos";
+                } else {
+                    video2x::logger()->critical(
+                        "Either output width/height (-w/-h) or a scaling factor (-s) "
+                        "must be set for lanczos."
+                    );
+                    return -1;
+                }
+                proc_cfg.config = graph_config;
+                break;
+            }
             case video2x::processors::ProcessorType::Libplacebo: {
                 if (!vm.count("libplacebo-shader")) {
                     video2x::logger()->critical("Shader name/path must be set for libplacebo.");
@@ -607,7 +634,28 @@ int parse_args(
         return -1;
     }
 
-    // Validate Vulkan device ID
+    // Validate the Vulkan device ID only for processors that actually use the GPU.
+    // Lanczos is a pure CPU rescale, so it must stay usable on machines without a
+    // working Vulkan driver — that is precisely its value as a universal fallback.
+    // VidStab / Denoise / FFmpegGraph all resolve to FilterFFmpegGraph (pure CPU) in
+    // ProcessorFactory; only HDR and the ncnn/libplacebo stages touch the GPU.
+    auto is_cpu_only = [](video2x::processors::ProcessorType t) {
+        return t == video2x::processors::ProcessorType::None ||
+               t == video2x::processors::ProcessorType::VidStab ||
+               t == video2x::processors::ProcessorType::Denoise ||
+               t == video2x::processors::ProcessorType::FFmpegGraph;
+    };
+    bool needs_vulkan = false;
+    for (const auto& cfg : proc_cfgs) {
+        if (!is_cpu_only(cfg.processor_type)) {
+            needs_vulkan = true;
+            break;
+        }
+    }
+    if (!needs_vulkan) {
+        return 0;
+    }
+
     VkPhysicalDeviceProperties dev_props;
     int get_vulkan_dev_ret = get_vulkan_device_prop(arguments.vk_device_index, &dev_props);
     if (get_vulkan_dev_ret != 0) {

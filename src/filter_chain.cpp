@@ -38,11 +38,22 @@ int FilterChain::compute_output_dimensions(
                     cur_h *= cfg.scaling_factor;
                 }
                 break;
+            case ProcessorType::FFmpegGraph:
+                // Generic filter graph: dimension-preserving when used for vidstab /
+                // denoise, but a rescaling graph (e.g. lanczos) carries either an
+                // explicit output size or a scale factor.
+                if (cfg.width > 0 && cfg.height > 0) {
+                    cur_w = cfg.width;
+                    cur_h = cfg.height;
+                } else if (cfg.scaling_factor > 0) {
+                    cur_w *= cfg.scaling_factor;
+                    cur_h *= cfg.scaling_factor;
+                }
+                break;
             case ProcessorType::RIFE:
             case ProcessorType::VidStab:
             case ProcessorType::Denoise:
             case ProcessorType::HDR:
-            case ProcessorType::FFmpegGraph:
                 // Dimension-preserving stages (optional explicit override)
                 if (cfg.width > 0 && cfg.height > 0) {
                     cur_w = cfg.width;

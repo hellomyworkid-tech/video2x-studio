@@ -1,7 +1,7 @@
 // Shared types for Video2X Studio
 
 export type ProcessorKind =
-    | 'libplacebo' | 'realesrgan' | 'realcugan' | 'rife' | 'span'
+    | 'lanczos' | 'libplacebo' | 'realesrgan' | 'realcugan' | 'rife' | 'span'
     | 'realbasicvsr' | 'flashvsr' | 'seedvr2';
 
 export type EngineKind = 'cli' | 'python';

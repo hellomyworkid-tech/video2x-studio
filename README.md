@@ -9,6 +9,61 @@
    <img src="https://img.shields.io/badge/dynamic/json?color=%23e85b46&label=Patreon&query=data.attributes.patron_count&suffix=%20patrons&url=https%3A%2F%2Fwww.patreon.com%2Fapi%2Fcampaigns%2F4507807&style=flat-square"/>
 </p>
 
+---
+
+# Video2X Studio
+
+**一台装在自己电脑上的视频修复工作室。**
+
+低清的、抖的、满是噪点的老片子，批量丢进去——出来就是高清的、稳的、干净的版本。
+全程本地运行，免费开源，不设上限。
+
+## 为什么是 Video2X Studio
+
+**① 旗舰级画质引擎，专治"没救"的片源**
+
+内置两套扩散模型旗舰引擎：字节跳动开源的 **SeedVR2-3B**——重度压缩、低码率、
+实拍老片的最强修复力；以及 **FlashVSR**——流式架构的时序一致性标杆，长视频不闪不跳。
+中坚力量覆盖全场景：RealBasicVSR（稳定无闪烁）、Real-ESRGAN / Real-CUGAN（实拍与动漫）、
+SPAN、Anime4K，外加 RIFE 补帧，最高把 24 帧老片顺成丝滑高帧率。
+
+**② 挂上队列就不用管**
+
+批量拖入整个文件夹，剩下的交给它：断电、崩溃、手滑关了窗口都不怕——
+分片检查点让任务从中断处继续，不浪费一秒已完成的算力。
+跑之前还能随时暂停。模型文件缺失？自动下载，内置国内镜像，不用折腾网络。
+NAS 网络盘里的片源直接处理，自动封装预处理。
+
+**③ 解压即用，不用当运维**
+
+Windows 便携包解压即跑：Python、CUDA 运行时、FFmpeg、模型全部内置，
+不污染系统，不折腾环境。界面就是拖进去、选档位、点开始三件事。
+
+## 它能帮你做什么
+
+- **老 DV / DVD / 演唱会录像** → 4K 修复，噪点、块效应一并抹掉
+- **手持拍摄晃得厉害** → vidstab 双通道防抖，先分析再校正
+- **SDR 老片** → 一键转 HDR，暗部与高光重新活过来
+- **动漫老番** → Real-CUGAN 高清放大 + RIFE 补帧
+- **网课、会议、录屏** → 模糊文字重新变得可读
+
+## 引擎档位速查
+
+| 档位 | 引擎 | 放大 | 适合片源 | 硬件建议 |
+|---|---|---|---|---|
+| 旗舰 | SeedVR2-3B（字节跳动，Apache 2.0） | 目标分辨率 | 重度压缩 / 低码率 / 老片实拍 | 大显存显卡 |
+| 旗舰 | FlashVSR（Apache 2.0） | 4× | 长视频 / 讲究时序一致 | 8 GB+ 显存 |
+| 中坚 | RealBasicVSR（Apache 2.0） | 4× | 实拍视频，稳定无闪烁 | 主流显卡 |
+| 经典 | Real-ESRGAN / Real-CUGAN / SPAN | 2×/3×/4× | 实拍与动漫全场景 | 入门显卡即可 |
+| 补帧 | RIFE（14 个版本可选） | — | 任意，提升到高帧率 | 入门显卡即可 |
+
+降噪、防抖、SDR→HDR 可与任意超分引擎自由串联成流水线（FilterChain）。
+
+**开源（AGPL-3.0）、免费、许可透明**：全部组件与权重许可逐项可查
+（[COMPLIANCE.md](COMPLIANCE.md)），个人与科研使用零门槛。
+
+---
+
 ## 🌟 Version 6.0.0
 
 Video2X 6.0.0 highlights:

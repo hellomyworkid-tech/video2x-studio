@@ -101,8 +101,10 @@ def main(args):
     log(f'FlashVSR: 双三次预放大到 {sW}x{sH} → 中心裁切到目标 {tW}x{tH}（128 对齐）')
 
     # decoder pipe
+    # -frames:v 限定解码帧数，避免读够后关管道导致解码器刷 Broken pipe 报错
     dec_cmd = [str(FFMPEG), '-hide_banner', '-loglevel', 'error',
-               '-i', args.input, '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
+               '-i', args.input, '-frames:v', str(TOTAL),
+               '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
     dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE, bufsize=W * H * 3 * 4)
 
     # encoder pipe (output = tW x tH)

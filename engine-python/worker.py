@@ -36,9 +36,14 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# 必须在 import torch 之前设置：减少长序列注意力下的显存碎片化
+# 必须在 import torch 之前设置：减少长序列注意力下的显存碎片化。
+# expandable_segments 仅 Linux 支持，Windows 上 PyTorch 会打警告后忽略
+# （"expandable_segments not supported on this platform"），需改用别的策略。
 import os
-os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+if os.name == 'nt':
+    os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'garbage_collection_threshold:0.8')
+else:
+    os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
 os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
 import numpy as np
@@ -293,11 +298,34 @@ def main():
     log(f'模型已加载（device={device}, fp16={fp16}）')
 
     # ---- 高分辨率自适应：空间分块推理 ----
-    TILE, TILE_OLAP = 512, 64
+    # 分块参数按显存分档。实测（RTX 5070 Ti 16GB，720x1280 输入）：
+    #   TILE=512 chunk=16  → 0.91 有效 fps（原默认）
+    #   TILE=768 chunk=32  → 1.52 有效 fps（1.67 倍），峰值 8.6 GB
+    # 更大的块反而更慢（激活超出 L2 变带宽瓶颈），1024 与完全不分块实测均劣于 768。
+    try:
+        vram_gb = torch.cuda.get_device_properties(device).total_memory / (1 << 30) if use_cuda else 0.0
+    except Exception:
+        vram_gb = 0.0
+    if vram_gb >= 14:
+        TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 32, 6
+    elif vram_gb >= 10:
+        TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 16, 6
+    elif vram_gb >= 6:
+        TILE, TILE_OLAP, TCHUNK, TOLAP = 512, 64, 16, 6
+    else:
+        TILE, TILE_OLAP, TCHUNK, TOLAP = 384, 48, 12, 4
+
     tiled = H > TILE or W > TILE
-    if tiled and args.chunk > 16:
-        args.chunk, args.overlap = 16, 6
-        log(f'高分辨率输入：启用空间分块推理（tile={TILE}, 时间分块 {args.chunk}/{args.overlap}）')
+    if tiled:
+        # acc 累加张量 = chunk×3×(H*4)×(W*4)×2 字节，是显存大头；
+        # 大分辨率输入下按预算回退时间分块长度，避免 OOM
+        budget = max(1.0, vram_gb) * 0.35 * (1 << 30)
+        while TCHUNK > 8 and TCHUNK * 3 * OH * OW * 2 > budget:
+            TCHUNK //= 2
+        TOLAP = min(TOLAP, max(2, TCHUNK // 4))
+        args.chunk, args.overlap = TCHUNK, TOLAP
+        log(f'高分辨率输入：启用空间分块推理（显存 {vram_gb:.1f} GB → tile={TILE}, '
+            f'时间分块 {args.chunk}/{args.overlap}）')
 
     def build_ramp(n, ramp):
         wgt = torch.ones(n)
@@ -423,8 +451,11 @@ def main():
         # 导致整段解码 0 帧；不带 -ss 从头解码反而正常
         seek_frame = max(0, seg_start - 8)
         dec_pre = [] if seek_frame == 0 else ['-ss', f'{seek_frame / FPS:.6f}']
+        # -frames:v 限定解码帧数：不加的话解码器会一直解到文件尾，等我们读够就
+        # 关管道，ffmpeg 拿到 EPIPE 刷一屏 "Broken pipe / Error muxing" 红字
         dec_cmd = [str(FFMPEG), '-hide_banner', '-loglevel', 'error',
                    *dec_pre, '-i', args.input,
+                   '-frames:v', str(seg_end - seek_frame),
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24',

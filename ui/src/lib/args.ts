@@ -45,7 +45,14 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
     }
 
     // ---- processor-specific ----
-    if (p.kind === 'libplacebo') {
+    if (p.kind === 'lanczos') {
+        // 纯缩放：倍率模式发 -s，指定分辨率模式发 -w/-h（CLI 两者都支持）
+        if (p.sizeMode === 'explicit') {
+            args.push('-w', String(p.width), '-h', String(p.height));
+        } else {
+            args.push('-s', String(p.scaleFactor));
+        }
+    } else if (p.kind === 'libplacebo') {
         args.push('--libplacebo-shader', p.shader);
         args.push('-w', String(p.width), '-h', String(p.height));
     } else if (p.kind === 'realesrgan') {
@@ -224,6 +231,9 @@ export const CUGAN_CAPS: Record<string, SrCaps> = {
 // SPAN: span-x2 / span-x4，无降噪参数
 export const SPAN_CAPS: SrCaps = { scales: [2, 4], noises: () => null, defaultNoise: -1 };
 
+// Lanczos：纯重采样，无模型无权重，任意整数倍率（也可切到指定分辨率模式）
+export const LANCZOS_CAPS: SrCaps = { scales: [2, 3, 4], noises: () => null, defaultNoise: -1 };
+
 // 旗舰档（Python sidecar）：固定 x4，无降噪档位（RealBasicVSR 内置时序清洁模块；
 // FlashVSR 输出为 128 对齐的中心裁切，UI 单独说明）
 export const FLAGSHIP_CAPS: SrCaps = { scales: [4], noises: () => null, defaultNoise: -1 };
@@ -234,6 +244,8 @@ export function capsFor(p: ProcessorCfg): SrCaps | null {
     if (p.kind === 'realesrgan') return ESRGAN_CAPS[p.realesrganModel] ?? null;
     if (p.kind === 'realcugan') return CUGAN_CAPS[p.realcuganModel] ?? null;
     if (p.kind === 'span') return SPAN_CAPS;
+    // lanczos 在倍率模式下才受倍率钳制；指定分辨率模式用显式宽高
+    if (p.kind === 'lanczos') return p.sizeMode === 'explicit' ? null : LANCZOS_CAPS;
     if (p.kind === 'realbasicvsr' || p.kind === 'flashvsr' || p.kind === 'seedvr2') return FLAGSHIP_CAPS;
     return null; // libplacebo 用显式宽高；rife 无缩放/降噪概念
 }
