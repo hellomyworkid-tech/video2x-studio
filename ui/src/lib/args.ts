@@ -183,9 +183,9 @@ export const REALESRGAN_MODELS = [
 ];
 export const REALCUGAN_MODELS = ['models-se', 'models-pro', 'models-nose'];
 export const RIFE_MODELS = [
-    'rife-v4.26', 'rife-v4.25', 'rife-v4.25-lite', 'rife-v4.6', 'rife-v4',
-    'rife-v3.1', 'rife-v3.0', 'rife-v2.4', 'rife-v2.3', 'rife-v2',
-    'rife-HD', 'rife-UHD', 'rife-anime', 'rife',
+    // 便携包只随附这两个：v4.26 为项目默认（最新），v4.6 为社区公认的
+    // 质量/稳定平衡点。其余版本仍可从源码树 models/rife/ 手动启用。
+    'rife-v4.26', 'rife-v4.6',
 ];
 export const SPAN_MODELS = ['span'];
 

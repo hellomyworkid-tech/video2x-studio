@@ -174,19 +174,12 @@ void ProcessorFactory::init_default_processors(ProcessorFactory& factory) {
            uint32_t vk_device_index) -> std::unique_ptr<Processor> {
             (void)vk_device_index;
             const auto& cfg = std::get<VidStabConfig>(proc_cfg.config);
-            std::string trf_str = fsutils::path_to_u8string(cfg.trf_path);
-            std::string trf_escaped;
-            for (char c : trf_str) {
-                if (c == '\\') trf_escaped += "/";
-                else if (c == ':') trf_escaped += "\\:";
-                else trf_escaped += c;
-            }
             std::string graph = fmt::format(
                 "vidstabtransform=smoothing={}:zoom={}:optzoom={}:input={}",
                 cfg.smoothing,
                 cfg.zoom,
                 cfg.optzoom ? 1 : 0,
-                trf_escaped
+                fsutils::escape_filter_path(cfg.trf_path)
             );
             return std::make_unique<FilterFFmpegGraph>(graph);
         }

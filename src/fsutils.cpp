@@ -168,5 +168,26 @@ fsutils::StringType to_string_type(int value) {
 #endif
 }
 
+std::string escape_filter_path(const std::filesystem::path& path) {
+    // Backslashes become forward slashes (FFmpeg accepts them on Windows and it
+    // avoids a third level of escaping); ':' must survive BOTH the filtergraph
+    // pass and the AVOption pass, hence the doubled backslash. Characters that
+    // delimit a filterchain are escaped once so the graph parser keeps them.
+    std::string escaped;
+    for (char c : path_to_u8string(path)) {
+        switch (c) {
+            case '\\': escaped += '/'; break;
+            case ':': escaped += "\\\\:"; break;
+            case '\'':
+            case '[':
+            case ']':
+            case ',':
+            case ';': escaped += '\\'; escaped += c; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
+}
+
 }  // namespace fsutils
 }  // namespace video2x

@@ -5,6 +5,7 @@
 #include <memory>
 #include "avutils.h"
 #include "decoder.h"
+#include "fsutils.h"
 #include "logger_manager.h"
 
 extern "C" {
@@ -74,23 +75,10 @@ int StabilizationPrepass::analyze(
         return ret;
     }
 
-    // Escape backslashes for windows paths in FFmpeg filter string
-    std::string trf_str = trf_output_path.string();
-    std::string trf_escaped;
-    for (char c : trf_str) {
-        if (c == '\\') trf_escaped += "/";
-        else if (c == ':') trf_escaped += "\\:";
-        else trf_escaped += c;
-    }
-
-    char filter_desc[1024];
-    snprintf(
-        filter_desc,
-        sizeof(filter_desc),
-        "vidstabdetect=shakiness=%d:result=%s",
-        config.shakiness,
-        trf_escaped.c_str()
-    );
+    // NOTE: a fixed-size snprintf buffer silently truncates long paths into a
+    // syntactically broken filter string, so build the description with std::string.
+    std::string filter_desc = "vidstabdetect=shakiness=" + std::to_string(config.shakiness) +
+                              ":result=" + fsutils::escape_filter_path(trf_output_path);
 
     AVFilterInOut* outputs = avfilter_inout_alloc();
     AVFilterInOut* inputs = avfilter_inout_alloc();
@@ -105,7 +93,7 @@ int StabilizationPrepass::analyze(
     inputs->pad_idx = 0;
     inputs->next = nullptr;
 
-    ret = avfilter_graph_parse_ptr(graph, filter_desc, &inputs, &outputs, nullptr);
+    ret = avfilter_graph_parse_ptr(graph, filter_desc.c_str(), &inputs, &outputs, nullptr);
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
 

@@ -30,47 +30,77 @@
       {
         "from": "../build-desktop/Release",
         "to": "build-desktop/Release",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../build-desktop/third_party/boost/libs/program_options/Release",
         "to": "build-desktop/third_party/boost/libs/program_options/Release",
-        "filter": ["**/*.dll"]
+        "filter": [
+          "**/*.dll"
+        ]
       },
       {
         "from": "../build-desktop/third_party/spdlog/Release",
         "to": "build-desktop/third_party/spdlog/Release",
-        "filter": ["**/*.dll"]
+        "filter": [
+          "**/*.dll"
+        ]
       },
       {
         "from": "../build-desktop/third_party/librealcugan_ncnn_vulkan/src/Release",
         "to": "build-desktop/third_party/librealcugan_ncnn_vulkan/src/Release",
-        "filter": ["**/*.dll"]
+        "filter": [
+          "**/*.dll"
+        ]
       },
       {
         "from": "../build-desktop/third_party/librealesrgan_ncnn_vulkan/src/Release",
         "to": "build-desktop/third_party/librealesrgan_ncnn_vulkan/src/Release",
-        "filter": ["**/*.dll"]
+        "filter": [
+          "**/*.dll"
+        ]
       },
       {
         "from": "../build-desktop/third_party/librife_ncnn_vulkan/src/Release",
         "to": "build-desktop/third_party/librife_ncnn_vulkan/src/Release",
-        "filter": ["**/*.dll"]
+        "filter": [
+          "**/*.dll"
+        ]
       },
       {
         "from": "../third_party/ffmpeg-shared",
         "to": "third_party/ffmpeg-shared",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../third_party/ncnn-shared/x64",
         "to": "third_party/ncnn-shared/x64",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../models",
         "to": "models",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*",
+          "!rife/rife/**",
+          "!rife/rife-HD/**",
+          "!rife/rife-UHD/**",
+          "!rife/rife-anime/**",
+          "!rife/rife-v2/**",
+          "!rife/rife-v2.3/**",
+          "!rife/rife-v2.4/**",
+          "!rife/rife-v3.0/**",
+          "!rife/rife-v3.1/**",
+          "!rife/rife-v4/**",
+          "!rife/rife-v4.25/**",
+          "!rife/rife-v4.25-lite/**"
+        ]
       },
       {
         "from": "../engine-python",
@@ -82,17 +112,7 @@
           "!weights/FlashVSR-v1.1/**",
           "!python/Lib/site-packages/torch/include/**",
           "!python/Lib/site-packages/*/tests/**",
-          "!python/Lib/site-packages/*/test/**",
-          "!python/Lib/site-packages/imageio/**",
-          "!python/Lib/site-packages/imageio_ffmpeg/**",
-          "!python/Lib/site-packages/modelscope/**",
-          "!python/Lib/site-packages/modelscope_hub/**",
-          "!python/Lib/site-packages/matplotlib/**",
-          "!python/Lib/site-packages/mpl_toolkits/**",
-          "!python/Lib/site-packages/fontTools/**",
-          "!python/Lib/site-packages/hf_xet/**",
-          "!python/Lib/site-packages/pip/**",
-          "!python/Lib/site-packages/setuptools/**"
+          "!python/Lib/site-packages/*/test/**"
         ]
       },
       {
