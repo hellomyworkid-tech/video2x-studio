@@ -318,16 +318,14 @@ def main():
     #   分块768 chunk24  47s      整帧 chunk12  56s（+19%）
     #   分块768 chunk16  56s      整帧 chunk16  59s
     #                             整帧 chunk8  105s（撞显存悬崖）
-    # 取舍：用 19% 时间换 1.63 dB 画质，因此默认整帧优先。
+    # 取舍：长片（一小时级）19% 就是数小时，因此默认走快的分块路径，
+    # 需要极致画质时用 --tile 0 换那 1.63 dB。
     # 注意 chunk16 反而比 chunk12 慢——10.2 GB 已进入劣化区，预算须卡在此之前。
     try:
-        if use_cuda:
-            free_b, total_b = torch.cuda.mem_get_info(device)
-            vram_gb, free_gb = total_b / (1 << 30), free_b / (1 << 30)
-        else:
-            vram_gb = free_gb = 0.0
+        vram_gb = (torch.cuda.get_device_properties(device).total_memory / (1 << 30)
+                   if use_cuda else 0.0)
     except Exception:
-        vram_gb = free_gb = 0.0
+        vram_gb = 0.0
 
     if vram_gb >= 14:
         TILE, TILE_OLAP, TCHUNK = 768, 64, 24
@@ -348,22 +346,21 @@ def main():
         o_gb = c * 3 * (TILE * 4) ** 2 * 4 / (1 << 30)
         return 4.7 + o_gb + c * 3 * OH * OW * 2 / (1 << 30)
 
-    # 0.60：实测 10.2 GB（占可用 68%）已明显劣化、11.3 GB 直接断崖，
-    # 卡到六成才能稳定落在悬崖之前
-    budget = max(1.0, free_gb if free_gb > 0 else vram_gb) * 0.60
+    # 预算必须用「总显存」而非「空闲显存」：检查点指纹含 tiled 字段，
+    # 一旦分块与否随当时的空闲显存浮动，续跑时后台多开个占显存的程序就会
+    # 让指纹对不上 → 已完成分片被当作参数变更全部删除、从第 0 帧重跑。
+    # 0.60：实测 10.2 GB（占 64%）已明显劣化、11.3 GB 直接断崖。
+    budget = max(1.0, vram_gb) * 0.60
     CHUNK_FLOOR = 12
 
-    # 先尽力走整帧：逐步缩短时间分块换取不分块（画质优先于 7% 的速度差）
-    full_chunk = TCHUNK
-    while full_chunk > CHUNK_FLOOR and est_full_gb(full_chunk) > budget:
-        full_chunk -= 4
-    tiled = est_full_gb(full_chunk) > budget
+    # 是否空间分块：按尺寸判定（确定性，与空闲显存无关）。
+    # 整帧画质高约 1.6 dB 但慢约 19%——对动辄一小时的长片是数小时的差距，
+    # 因此默认走快的分块路径；需要极致画质时用 --tile 0 强制整帧。
+    tiled = H > TILE or W > TILE
 
-    if not tiled:
-        TCHUNK = full_chunk
-    else:
-        while TCHUNK > CHUNK_FLOOR and est_tiled_gb(TCHUNK) > budget:
-            TCHUNK -= 4
+    est_peak = est_tiled_gb if tiled else est_full_gb
+    while TCHUNK > CHUNK_FLOOR and est_peak(TCHUNK) > budget:
+        TCHUNK -= 4
     TOLAP = 6 if TCHUNK >= 12 else max(2, TCHUNK // 4)
 
     # 显式传入的 --chunk / --tile 优先于自动决策（调参与排障用；
@@ -379,12 +376,12 @@ def main():
     args.chunk, args.overlap = TCHUNK, TOLAP
 
     if tiled:
-        log(f'输入过大，整帧推理放不下（需 {est_full_gb(CHUNK_FLOOR):.1f} GB > 可用预算 '
-            f'{budget:.1f} GB）：启用空间分块 tile={TILE}，画质约损失 1.6 dB；'
-            f'时间分块 {args.chunk}/{args.overlap}，预计峰值 {est_tiled_gb(TCHUNK):.1f} GB')
+        log(f'空间分块 tile={TILE}（速度优先；整帧画质约高 1.6 dB 但慢约 19%，'
+            f'可用 --tile 0 强制整帧）：时间分块 {args.chunk}/{args.overlap}，'
+            f'预计峰值 {est_tiled_gb(TCHUNK):.1f} GB / 总显存 {vram_gb:.1f} GB')
     else:
         log(f'整帧推理（不分块，画质最佳）：时间分块 {args.chunk}/{args.overlap}，'
-            f'预计峰值 {est_full_gb(TCHUNK):.1f} GB / 可用 {free_gb:.1f} GB')
+            f'预计峰值 {est_full_gb(TCHUNK):.1f} GB / 总显存 {vram_gb:.1f} GB')
 
     def build_ramp(n, ramp):
         wgt = torch.ones(n)
