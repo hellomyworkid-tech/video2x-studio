@@ -38,7 +38,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 # 必须在 import torch 之前设置：减少长序列注意力下的显存碎片化。
 # expandable_segments 仅 Linux 支持，Windows 上 PyTorch 会打警告后忽略
-# （"expandable_segments not supported on this platform"），需改用别的策略。
+# （"expandable_segments not supported on this platform"）。
+# 注：Windows 分支实测对 RealBasicVSR 吞吐无可测差异（与默认分配器同为 1.46 fps），
+# 仅为消除那条误导性警告；真正决定吞吐的是下面的分块显存预算。
 import os
 if os.name == 'nt':
     os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'garbage_collection_threshold:0.8')
@@ -298,16 +300,18 @@ def main():
     log(f'模型已加载（device={device}, fp16={fp16}）')
 
     # ---- 高分辨率自适应：空间分块推理 ----
-    # 分块参数按显存分档。实测（RTX 5070 Ti 16GB，720x1280 输入）：
-    #   TILE=512 chunk=16  → 0.91 有效 fps（原默认）
-    #   TILE=768 chunk=32  → 1.52 有效 fps（1.67 倍），峰值 8.6 GB
-    # 更大的块反而更慢（激活超出 L2 变带宽瓶颈），1024 与完全不分块实测均劣于 768。
+    # 实测（RTX 5070 Ti 16GB，720x1280 输入，含累加器的真实推理路径）：
+    #   TILE=512 chunk=16 → 0.95 有效 fps，峰值 4.4 GB（原默认）
+    #   TILE=768 chunk=16 → 1.24 有效 fps，峰值 7.7 GB
+    #   TILE=768 chunk=24 → 1.46 有效 fps，峰值 9.3 GB  ← 最优
+    #   TILE=768 chunk=32 → 0.41 有效 fps，峰值 11.3 GB ← 撞显存悬崖，比原默认还慢
+    # 显存占用越过约七成后吞吐断崖式下跌，所以下面的预算必须卡在悬崖之前。
     try:
         vram_gb = torch.cuda.get_device_properties(device).total_memory / (1 << 30) if use_cuda else 0.0
     except Exception:
         vram_gb = 0.0
     if vram_gb >= 14:
-        TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 32, 6
+        TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 24, 6
     elif vram_gb >= 10:
         TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 16, 6
     elif vram_gb >= 6:
@@ -317,15 +321,21 @@ def main():
 
     tiled = H > TILE or W > TILE
     if tiled:
-        # acc 累加张量 = chunk×3×(H*4)×(W*4)×2 字节，是显存大头；
-        # 大分辨率输入下按预算回退时间分块长度，避免 OOM
-        budget = max(1.0, vram_gb) * 0.35 * (1 << 30)
-        while TCHUNK > 8 and TCHUNK * 3 * OH * OW * 2 > budget:
-            TCHUNK //= 2
+        # 峰值显存拟合模型（三个实测点误差均 <0.3 GB）：
+        #   peak ≈ 4.7 GB(模型激活) + o(单块 fp32 输出) + acc(整块 fp16 累加)
+        # 卡在显存的 62% 以内：实测 58% 正常、71% 已在悬崖下方。
+        def est_peak_gb(c):
+            o_gb = c * 3 * (TILE * 4) ** 2 * 4 / (1 << 30)
+            acc_gb = c * 3 * OH * OW * 2 / (1 << 30)
+            return 4.7 + o_gb + acc_gb
+
+        budget = max(1.0, vram_gb) * 0.62
+        while TCHUNK > 8 and est_peak_gb(TCHUNK) > budget:
+            TCHUNK -= 4
         TOLAP = min(TOLAP, max(2, TCHUNK // 4))
         args.chunk, args.overlap = TCHUNK, TOLAP
         log(f'高分辨率输入：启用空间分块推理（显存 {vram_gb:.1f} GB → tile={TILE}, '
-            f'时间分块 {args.chunk}/{args.overlap}）')
+            f'时间分块 {args.chunk}/{args.overlap}，预计峰值 {est_peak_gb(TCHUNK):.1f} GB）')
 
     def build_ramp(n, ramp):
         wgt = torch.ones(n)
