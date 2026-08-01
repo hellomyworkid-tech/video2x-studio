@@ -78,7 +78,21 @@
         "filter": [
           "**/*",
           "!.venv/**",
-          "!**/__pycache__/**"
+          "!**/__pycache__/**",
+          "!weights/FlashVSR-v1.1/**",
+          "!python/Lib/site-packages/torch/include/**",
+          "!python/Lib/site-packages/*/tests/**",
+          "!python/Lib/site-packages/*/test/**",
+          "!python/Lib/site-packages/imageio/**",
+          "!python/Lib/site-packages/imageio_ffmpeg/**",
+          "!python/Lib/site-packages/modelscope/**",
+          "!python/Lib/site-packages/modelscope_hub/**",
+          "!python/Lib/site-packages/matplotlib/**",
+          "!python/Lib/site-packages/mpl_toolkits/**",
+          "!python/Lib/site-packages/fontTools/**",
+          "!python/Lib/site-packages/hf_xet/**",
+          "!python/Lib/site-packages/pip/**",
+          "!python/Lib/site-packages/setuptools/**"
         ]
       },
       {
