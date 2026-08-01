@@ -57,6 +57,9 @@ FFMPEG = FFMPEG_DIR / 'ffmpeg.exe'
 FFPROBE = FFMPEG_DIR / 'ffprobe.exe'
 
 
+CHUNK_AUTO = -1   # --chunk 未显式指定的哨兵值（0 是非法块长，不能兼作哨兵）
+
+
 def log(msg):
     print(f'[worker] {msg}', flush=True)
 
@@ -229,7 +232,10 @@ def main():
     ap.add_argument('-o', '--output', required=True)
     ap.add_argument('--codec', default='libx264')
     ap.add_argument('--crf', type=int, default=18)
-    ap.add_argument('--chunk', type=int, default=32, help='推理分块长度（帧）')
+    ap.add_argument('--chunk', type=int, default=CHUNK_AUTO,
+                    help='时间分块长度（帧）；不传则按显存自适应')
+    ap.add_argument('--tile', type=int, default=-1,
+                    help='空间分块边长（px）；0=强制整帧不分块，-1(默认)=按显存自适应')
     ap.add_argument('--overlap', type=int, default=8, help='分块重叠长度（帧）')
     ap.add_argument('--segment', type=int, default=200, help='FlashVSR 分段帧数（0=整段）')
     ap.add_argument('--seg-len', type=int, default=240, help='断点续跑宏分片长度（帧）')
@@ -261,7 +267,8 @@ def main():
         seed_main(args)
         return
 
-    if args.overlap >= args.chunk:
+    # 仅在显式指定 chunk 时校验；未指定时 chunk 是哨兵值，由下方显存自适应决定
+    if args.chunk != CHUNK_AUTO and args.overlap >= args.chunk:
         fail('overlap 必须小于 chunk')
 
     if not FFMPEG.exists():
@@ -299,43 +306,85 @@ def main():
         device=device, fp16=fp16)
     log(f'模型已加载（device={device}, fp16={fp16}）')
 
-    # ---- 高分辨率自适应：空间分块推理 ----
-    # 实测（RTX 5070 Ti 16GB，720x1280 输入，含累加器的真实推理路径）：
-    #   TILE=512 chunk=16 → 0.95 有效 fps，峰值 4.4 GB（原默认）
-    #   TILE=768 chunk=16 → 1.24 有效 fps，峰值 7.7 GB
-    #   TILE=768 chunk=24 → 1.46 有效 fps，峰值 9.3 GB  ← 最优
-    #   TILE=768 chunk=32 → 0.41 有效 fps，峰值 11.3 GB ← 撞显存悬崖，比原默认还慢
-    # 显存占用越过约七成后吞吐断崖式下跌，所以下面的预算必须卡在悬崖之前。
+    # ---- 显存自适应：优先整帧推理，放不下才空间分块 ----
+    # 空间分块省显存，但画质有明显代价（RTX 5070 Ti，720x1280，真值重建 PSNR）：
+    #   整帧          28.76 dB
+    #   分块 TILE=768 27.13 dB  （-1.63 dB）
+    #   分块 TILE=512 27.13 dB  （-1.63 dB）
+    # 损失是阶跃的：2 块与 6 块几乎一样差，说明代价来自网络失去全局上下文，
+    # 而非接缝数量。1.63 dB 远大于其他所有优化项的收益（EMA 权重才 +0.56 dB）。
+    #
+    # 速度上整帧确实更慢（60 帧端到端实测，含约 15s 模型加载）：
+    #   分块768 chunk24  47s      整帧 chunk12  56s（+19%）
+    #   分块768 chunk16  56s      整帧 chunk16  59s
+    #                             整帧 chunk8  105s（撞显存悬崖）
+    # 取舍：用 19% 时间换 1.63 dB 画质，因此默认整帧优先。
+    # 注意 chunk16 反而比 chunk12 慢——10.2 GB 已进入劣化区，预算须卡在此之前。
     try:
-        vram_gb = torch.cuda.get_device_properties(device).total_memory / (1 << 30) if use_cuda else 0.0
+        if use_cuda:
+            free_b, total_b = torch.cuda.mem_get_info(device)
+            vram_gb, free_gb = total_b / (1 << 30), free_b / (1 << 30)
+        else:
+            vram_gb = free_gb = 0.0
     except Exception:
-        vram_gb = 0.0
+        vram_gb = free_gb = 0.0
+
     if vram_gb >= 14:
-        TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 24, 6
+        TILE, TILE_OLAP, TCHUNK = 768, 64, 24
     elif vram_gb >= 10:
-        TILE, TILE_OLAP, TCHUNK, TOLAP = 768, 64, 16, 6
+        TILE, TILE_OLAP, TCHUNK = 768, 64, 16
     elif vram_gb >= 6:
-        TILE, TILE_OLAP, TCHUNK, TOLAP = 512, 64, 16, 6
+        TILE, TILE_OLAP, TCHUNK = 512, 64, 16
     else:
-        TILE, TILE_OLAP, TCHUNK, TOLAP = 384, 48, 12, 4
+        TILE, TILE_OLAP, TCHUNK = 384, 48, 12
 
-    tiled = H > TILE or W > TILE
-    if tiled:
-        # 峰值显存拟合模型（三个实测点误差均 <0.3 GB）：
-        #   peak ≈ 4.7 GB(模型激活) + o(单块 fp32 输出) + acc(整块 fp16 累加)
-        # 卡在显存的 62% 以内：实测 58% 正常、71% 已在悬崖下方。
-        def est_peak_gb(c):
-            o_gb = c * 3 * (TILE * 4) ** 2 * 4 / (1 << 30)
-            acc_gb = c * 3 * OH * OW * 2 / (1 << 30)
-            return 4.7 + o_gb + acc_gb
+    # 峰值显存拟合模型（各实测点误差 <0.3 GB）
+    #   整帧：≈ chunk × 输入像素 × 743 B（720x1280 chunk=16 实测 10.2 GB）
+    #   分块：≈ 4.7 GB 模型激活 + o(单块 fp32 输出) + acc(整帧 fp16 累加)
+    def est_full_gb(c):
+        return c * H * W * 743 / (1 << 30)
 
-        budget = max(1.0, vram_gb) * 0.62
-        while TCHUNK > 8 and est_peak_gb(TCHUNK) > budget:
+    def est_tiled_gb(c):
+        o_gb = c * 3 * (TILE * 4) ** 2 * 4 / (1 << 30)
+        return 4.7 + o_gb + c * 3 * OH * OW * 2 / (1 << 30)
+
+    # 0.60：实测 10.2 GB（占可用 68%）已明显劣化、11.3 GB 直接断崖，
+    # 卡到六成才能稳定落在悬崖之前
+    budget = max(1.0, free_gb if free_gb > 0 else vram_gb) * 0.60
+    CHUNK_FLOOR = 12
+
+    # 先尽力走整帧：逐步缩短时间分块换取不分块（画质优先于 7% 的速度差）
+    full_chunk = TCHUNK
+    while full_chunk > CHUNK_FLOOR and est_full_gb(full_chunk) > budget:
+        full_chunk -= 4
+    tiled = est_full_gb(full_chunk) > budget
+
+    if not tiled:
+        TCHUNK = full_chunk
+    else:
+        while TCHUNK > CHUNK_FLOOR and est_tiled_gb(TCHUNK) > budget:
             TCHUNK -= 4
-        TOLAP = min(TOLAP, max(2, TCHUNK // 4))
-        args.chunk, args.overlap = TCHUNK, TOLAP
-        log(f'高分辨率输入：启用空间分块推理（显存 {vram_gb:.1f} GB → tile={TILE}, '
-            f'时间分块 {args.chunk}/{args.overlap}，预计峰值 {est_peak_gb(TCHUNK):.1f} GB）')
+    TOLAP = 6 if TCHUNK >= 12 else max(2, TCHUNK // 4)
+
+    # 显式传入的 --chunk / --tile 优先于自动决策（调参与排障用；
+    # 此前无论用户传什么都会被静默覆盖）
+    if args.chunk != CHUNK_AUTO:
+        TCHUNK = max(2, args.chunk)
+        TOLAP = min(args.overlap, TCHUNK - 1)
+        log(f'使用显式指定的时间分块 {TCHUNK}/{TOLAP}（跳过显存自适应）')
+    if args.tile >= 0:
+        TILE = args.tile
+        tiled = TILE > 0 and (H > TILE or W > TILE)
+        log(f'使用显式指定的空间分块 tile={TILE}（tiled={tiled}）')
+    args.chunk, args.overlap = TCHUNK, TOLAP
+
+    if tiled:
+        log(f'输入过大，整帧推理放不下（需 {est_full_gb(CHUNK_FLOOR):.1f} GB > 可用预算 '
+            f'{budget:.1f} GB）：启用空间分块 tile={TILE}，画质约损失 1.6 dB；'
+            f'时间分块 {args.chunk}/{args.overlap}，预计峰值 {est_tiled_gb(TCHUNK):.1f} GB')
+    else:
+        log(f'整帧推理（不分块，画质最佳）：时间分块 {args.chunk}/{args.overlap}，'
+            f'预计峰值 {est_full_gb(TCHUNK):.1f} GB / 可用 {free_gb:.1f} GB')
 
     def build_ramp(n, ramp):
         wgt = torch.ones(n)

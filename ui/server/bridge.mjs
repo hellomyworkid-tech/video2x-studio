@@ -1550,14 +1550,19 @@ const server = http.createServer(async (req, res) => {
                     warnings.push({ level: 'warn', text: '输入 ≥1080p：FlashVSR 4x 后输出超 4K，显存与时间开销极大，建议改用 RealBasicVSR 或 NCNN 引擎。' });
                 }
             } else if (model === 'realbasicvsr') {
-                // 吞吐随是否触发空间分块（输入任一边 >512px）差一个数量级：
-                // RTX 5070 Ti 实测 720x1280 分块路径仅 ~1.5 fps，小尺寸不分块才有 ~8 fps。
-                // 原先固定按 15 fps 估算，对竖屏 720p 素材要低估约 10 倍。
-                const tiled = probeInfo.width > 512 || probeInfo.height > 512;
-                const tput = tiled ? 1.5 : 8;
+                // 吞吐随输入尺寸差一个数量级：RTX 5070 Ti 端到端实测 720x1280 约 1.4 fps，
+                // 小尺寸（各边 ≤512px）才有 ~8 fps。原先固定按 15 fps 估算，
+                // 对竖屏 720p 素材低估约 10 倍。
+                const heavy = probeInfo.width > 512 || probeInfo.height > 512;
+                const tput = heavy ? 1.4 : 8;
                 const hours = frames / tput / 3600;
                 if (hours > 0.25) {
-                    warnings.push({ level: 'warn', text: `RealBasicVSR 吞吐约 ${tput} fps${tiled ? '（输入超过 512px，已启用空间分块，显著更慢）' : ''}：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时（支持断点续跑，可分多次完成）。若源本身码率高、画面干净，建议改用 SPAN 或 Lanczos——快数十倍且更忠实于原貌。` });
+                    warnings.push({ level: 'warn', text: `RealBasicVSR 吞吐约 ${tput} fps（参考 RTX 5070 Ti 实测；${heavy ? '大尺寸输入显著更慢' : '小尺寸输入'}）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时（支持断点续跑，可分多次完成）。若源本身码率高、画面干净，建议改用 SPAN 或 Lanczos——快数十倍且更忠实于原貌。` });
+                }
+                // 显存不足以整帧推理时会退化为空间分块，画质有实测可见的损失
+                const estFullGb = 12 * probeInfo.width * probeInfo.height * 743 / (1024 ** 3);
+                if (estFullGb > 8) {
+                    warnings.push({ level: 'warn', text: `输入尺寸较大：整帧推理约需 ${estFullGb.toFixed(1)} GB 显存，显存不足时会自动退化为空间分块——实测画质约损失 1.6 dB（网络被切开后拿不到全局上下文）。追求画质建议先把源缩到 720p 级别再超分。` });
                 }
             } else if (model === 'seedvr2') {
                 const hours = frames / 0.4 / 3600;
