@@ -1,6 +1,6 @@
 import { Crown, Gauge, Gem, ImagePlus, Layers, Scaling, Sparkles, Timer } from 'lucide-react';
 import {
-    capsFor, CUGAN_NOISE_LABELS, normalizeProcessor,
+    capsFor, CUGAN_NOISE_LABELS, normalizeProcessor, recommendedCrf,
     REALCUGAN_MODELS, REALESRGAN_MODELS, RIFE_MODELS, SHADERS, SPAN_MODELS,
 } from '@/lib/args';
 import type { JobRequest, ProcessorKind } from '@/types';
@@ -48,6 +48,24 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
         onChange({ processor: normalizeProcessor(merged) });
     };
 
+    /**
+     * 切换处理器：顺带把质量档跟到新处理器的推荐值。
+     * 仅当当前值仍等于「旧处理器的推荐值」时才跟随 —— 也就是用户没手动调过；
+     * 一旦手动改过就视为用户接管，不再覆盖他的选择。
+     */
+    const pickProcessor = (kind: typeof p.kind) => {
+        const next: Partial<typeof p> = { kind };
+        // 初次切到 lanczos 默认走倍率模式（预设的横屏分辨率对竖屏源是错的）
+        if (kind === 'lanczos' && p.kind !== 'lanczos') next.sizeMode = 'scale';
+        const patch: Parameters<typeof onChange>[0] = {
+            processor: normalizeProcessor({ ...p, ...next }),
+        };
+        if (req.encoder.crf === recommendedCrf(p.kind)) {
+            patch.encoder = { ...req.encoder, crf: recommendedCrf(kind) };
+        }
+        onChange(patch);
+    };
+
     const caps = capsFor(p);
     const allowedNoises = caps ? caps.noises(p.scaleFactor) : null;
     const singleScale = caps !== null && caps.scales.length === 1;
@@ -65,12 +83,7 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                     return (
                         <button
                             key={proc.kind}
-                            onClick={() => setP(
-                                // 初次切到 lanczos 默认走倍率模式（比预设的横屏分辨率更通用）
-                                proc.kind === 'lanczos' && p.kind !== 'lanczos'
-                                    ? { kind: proc.kind, sizeMode: 'scale' }
-                                    : { kind: proc.kind }
-                            )}
+                            onClick={() => pickProcessor(proc.kind)}
                             title={proc.tagline}
                             className={cn(
                                 'group relative flex flex-col items-center gap-1 rounded-lg border bg-gradient-to-b px-1.5 py-2.5 text-center transition-all duration-200',

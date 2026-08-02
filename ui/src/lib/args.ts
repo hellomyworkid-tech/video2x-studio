@@ -122,6 +122,26 @@ export function qualityOpts(codec: string, crf: number): [string, string][] {
     return [['crf', q]];
 }
 
+/**
+ * 各处理器建议的恒定质量值（x264/x265 刻度，越低越清晰）。
+ *
+ * 依据实测的率失真曲线（1383 帧 720×1280→1440×2560，vs 各自的无损参考）：
+ *   CRF   Lanczos 体积/PSNR    SPAN 体积/PSNR
+ *    23     42MB / 45.50        49MB / 43.91
+ *    20     64MB / 47.08        78MB / 45.54
+ *    18     84MB / 48.15       104MB / 46.69
+ *    16    109MB / 49.24       137MB / 47.89
+ * 同一 CRF 下 AI 输出被压得更狠（起点低约 1.6 dB）——高频细节正是量化最先
+ * 丢弃的部分。而决定要不要调低的关键是编码在总耗时里的占比：
+ *   Lanczos 编码占 93%（降 CRF 直接拉长总时间，取 20 折中）
+ *   SPAN 等占约 16%、RealBasicVSR/SeedVR2 不足 10%
+ *   —— 花几小时算出来的细节没理由在最后这点开销上丢掉，故取 18。
+ */
+export function recommendedCrf(kind: ProcessorKind): number {
+    if (kind === 'lanczos' || kind === 'libplacebo' || kind === 'rife') return 20;
+    return 18;
+}
+
 export function buildOutputPath(req: JobRequest, inputPath: string): string {
     const base = inputPath.replace(/\\/g, '/').split('/').pop() || 'output';
     const stem = base.replace(/\.[^.]+$/, '');
@@ -177,11 +197,13 @@ export function defaultJobRequest(): JobRequest {
             customCodec: '',
             pixFmt: '',
             bitRate: 0,
-            crf: -1,
             extraOpts: [],
             copyAudio: true,
             copySubs: true,
             recalculatePts: true,
+            // 与默认处理器（lanczos）的推荐值保持一致；切换处理器时会自动跟随，
+            // 但用户手动改过之后就不再覆盖（见 ProcessorSection 的 pickProcessor）
+            crf: recommendedCrf('lanczos'),
         },
         advanced: {
             deviceIndex: 0,
