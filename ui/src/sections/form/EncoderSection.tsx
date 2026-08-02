@@ -100,7 +100,8 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                 <div className="mt-3 rounded-lg border border-border/60 bg-black/20 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground/85">
                     <div className="mb-1 font-medium text-foreground/80">编码器怎么选</div>
                     在相同画质下，各编码器的差别<strong>不在"看起来怎样"，而在体积和速度</strong>。
-                    下表为实测（1383 帧 720×1280→1440×2560，RTX 5070 Ti，PSNR 对无损参考）：
+                    下表为一组实测参考值（<strong>Lanczos ×2</strong>，1383 帧 720×1280→1440×2560，
+                    RTX 5070 Ti，PSNR 对无损参考）：
                     <div className="mt-1.5 overflow-x-auto">
                         <table className="w-full text-[10.5px]">
                             <thead className="text-muted-foreground/70">
@@ -119,6 +120,13 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                         这些 PSNR 都在 46 dB 以上（视觉无损区间），实测同一帧放大后<strong>肉眼无法区分</strong>。
                         所以除非要压到极小体积，按<strong>速度和兼容性</strong>选即可：N 卡优先 hevc_nvenc（快 3 倍且画质不输 x264）；
                         要发给老设备/老播放器就用 libx264。
+                    </div>
+                    <div className="mt-1.5 border-t border-border/50 pt-1.5">
+                        <strong>换处理器后这些数字会变，但排序不变。</strong>
+                        同条件换成 SPAN ×2（AI 超分的锐利内容更难压）实测排序完全一致，
+                        但同设置下体积大 20~25%、PSNR 低约 1.7 dB；放大倍率翻倍则耗时约涨 3.5 倍
+                        （4× 到 2880×5120 时 libx264 约 51s、hevc_nvenc 约 18s）。
+                        所以上表适合用来<strong>选编码器</strong>，不适合当作绝对耗时/体积的预估。
                     </div>
                 </div>
             </div>
