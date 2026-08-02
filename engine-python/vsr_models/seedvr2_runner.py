@@ -31,7 +31,7 @@ WEIGHTS_DIR = ENGINE_DIR / 'weights' / 'SeedVR2-3B'
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args  # noqa: E402
 
 
 def compute_output_dims(w0, h0, resolution):
@@ -256,7 +256,7 @@ def main(args):
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24',
                    '-s', f'{oW}x{oH}', '-r', fps_str, '-i', 'pipe:0',
-                   '-an', '-c:v', args.codec, '-crf', str(args.crf),
+                   '-an', '-c:v', args.codec, *quality_args(args.codec, args.crf),
                    '-pix_fmt', 'yuv420p', seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)

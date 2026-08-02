@@ -91,7 +91,7 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
     if (!enc.copyAudio) args.push('--no-copy-audio-streams');
     if (!enc.copySubs) args.push('--no-copy-subtitle-streams');
     if (!enc.recalculatePts) args.push('--no-recalculate-pts');
-    if (enc.crf >= 0) args.push('-e', `crf=${enc.crf}`);
+    for (const [k, v] of qualityOpts(codec, enc.crf)) args.push('-e', `${k}=${v}`);
     for (const opt of enc.extraOpts) {
         if (opt.key.trim()) args.push('-e', `${opt.key.trim()}=${opt.value.trim()}`);
     }
@@ -102,6 +102,24 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
     // Progress is parsed from stdout; keep the bar enabled (default).
 
     return args;
+}
+
+/**
+ * 恒定质量参数名因编码器而异，发错了 FFmpeg 只会打一条 warning 然后**静默忽略**，
+ * 任务照常完成但质量控制完全失效（实测 hevc_nvenc 发 crf=20 时产物 112 MB，
+ * 发正确的 cq=20 是 97 MB）。因此必须按编码器映射：
+ *   crf                 —— libx264 / libx265 / libx264rgb / libaom-av1 / libvpx-vp9
+ *   cq                  —— *_nvenc（N 卡硬编）
+ *   qvbr_quality_level  —— *_amf（A 卡硬编），且需同时把 rc 切到 qvbr 才生效
+ * 数值刻度三者接近（均 0–51，越小越好），可直接沿用同一个数字。
+ */
+export function qualityOpts(codec: string, crf: number): [string, string][] {
+    if (crf < 0 || !codec) return [];
+    const q = String(crf);
+    if (/_nvenc$/.test(codec)) return [['cq', q]];
+    if (/_amf$/.test(codec)) return [['rc', 'qvbr'], ['qvbr_quality_level', q]];
+    // 其余（含自定义编码器）沿用 crf：x264/x265/AV1/VP9 系列都用它
+    return [['crf', q]];
 }
 
 export function buildOutputPath(req: JobRequest, inputPath: string): string {

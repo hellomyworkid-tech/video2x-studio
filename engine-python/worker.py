@@ -219,6 +219,21 @@ def probe(path):
     }
 
 
+def quality_args(codec, crf):
+    """恒定质量参数名因编码器而异；发错了 ffmpeg 只 warning 后静默忽略，
+    任务照常完成但质量控制失效（实测 hevc_nvenc 用 -crf 产物比用 -cq 大 15%）。
+      crf                —— libx264 / libx265 / libaom-av1 / libvpx-vp9 等
+      cq                 —— *_nvenc（N 卡硬编）
+      qvbr_quality_level —— *_amf（A 卡硬编），需同时把 rc 切到 qvbr
+    """
+    c = str(codec or '')
+    if c.endswith('_nvenc'):
+        return ['-cq', str(crf)]
+    if c.endswith('_amf'):
+        return ['-rc', 'qvbr', '-qvbr_quality_level', str(crf)]
+    return ['-crf', str(crf)]
+
+
 def fmt_hms(seconds):
     seconds = max(0, int(seconds))
     return f'{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}'
@@ -507,7 +522,7 @@ def main():
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24',
                    '-s', f'{OW}x{OH}', '-r', fps_str, '-i', 'pipe:0',
-                   '-an', '-c:v', args.codec, '-crf', str(args.crf),
+                   '-an', '-c:v', args.codec, *quality_args(args.codec, args.crf),
                    '-pix_fmt', 'yuv420p', seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)

@@ -355,7 +355,8 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                 )}
 
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
-                    {p.kind === 'lanczos' && '纯 Lanczos 重采样，不含任何神经网络：不占显存、约 60 fps、绝不产生伪影或"塑料感"。对高码率清晰源（如 8 Mbps 以上的现代 H.264/HEVC），实测重建保真度反而高于全部 Real-ESRGAN 模型——源没有丢失细节时，AI 的"脑补"只会偏离原貌。想要更锐一点可改用 SPAN。'}
+                    {p.kind === 'lanczos' && '纯 Lanczos 重采样，不含任何神经网络：不占显存、绝不产生伪影或"塑料感"。对高码率清晰源（如 8 Mbps 以上的现代 H.264/HEVC），实测重建保真度反而高于全部 Real-ESRGAN 模型——源没有丢失细节时，AI 的"脑补"只会偏离原貌。想要更锐一点可改用 SPAN。'}
+                    {p.kind === 'lanczos' && ' 缩放本身的耗时可忽略（1383 帧加不加 Lanczos 都是 2 秒），因此无需 GPU 加速——实测走 CUDA 硬解+scale_cuda 的全 GPU 链路反而更慢。真正的瓶颈是编码器，占总耗时约 90%：换成 hevc_nvenc 可直接快一倍（详见「编码器」标签页）。'}
                     {p.kind === 'libplacebo' && 'libplacebo 需要显式指定输出分辨率；Anime4K 系列着色器对动漫/动画内容效果最好，速度极快。'}
                     {p.kind === 'realesrgan' && 'realesr-animevideov3 支持 2/3/4×，为动漫视频训练；realesrgan-plus / nomos8k / realwebphoto 仅 4×；realesr-generalv3 仅 4× 但可启用 WDN 降噪变体；nomos8k-compact 仅 2×。缩放选项已按模型实际权重锁定。注意：这些模型均为 GAN 训练，会"再生"细节——源越糊收益越大，对已经清晰的高码率源反而可能不如 Lanczos / SPAN 忠实；真人素材请勿使用 animevideov3（会明显塑料化）。'}
                     {p.kind === 'realcugan' && 'models-se 综合最佳（2× 时另有 1x/2x 精细降噪档）；models-pro 仅 2/3×；models-nose 仅 2× 且固定不降噪。降噪档位随 模型+倍率 联动。为动漫内容设计，真人素材建议改用 SPAN。2K 以上输出显存占用较高。'}
