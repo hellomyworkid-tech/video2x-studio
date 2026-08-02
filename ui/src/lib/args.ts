@@ -139,7 +139,9 @@ export function defaultJobRequest(): JobRequest {
         nameTemplate: '{name}_v2x.{ext}',
         container: 'mp4',
         processor: {
-            kind: 'libplacebo',
+            // 默认 Lanczos：无模型、不占显存、零伪影，对高码率清晰源实测保真度
+            // 高于全部 Real-ESRGAN 模型，是最稳妥的起点；需要 AI 重建再自行切换
+            kind: 'lanczos',
             shader: 'anime4k-v4-a+a',
             realesrganModel: 'realesr-animevideov3',
             realcuganModel: 'models-se',
@@ -148,7 +150,9 @@ export function defaultJobRequest(): JobRequest {
             rifeModel: 'rife-v4.26',
             rifeUhd: false,
             spanModel: 'span',
-            sizeMode: 'explicit',
+            // 配合默认的 Lanczos 走倍率模式：预设的 1920x1080 对竖屏源是错的，
+            // 而 ×2 对任意画幅都成立（libplacebo 不读 sizeMode，始终用显式宽高）
+            sizeMode: 'scale',
             scaleFactor: 2,
             width: 1920,
             height: 1080,
