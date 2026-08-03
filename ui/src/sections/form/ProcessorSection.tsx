@@ -27,8 +27,8 @@ const PROCESSORS: {
 }[] = [
     { kind: 'lanczos', name: 'Lanczos', tagline: '纯重采样 · 零伪影 · 高码率清晰源的稳妥之选', icon: Scaling, accent: 'from-slate-400/20 to-slate-500/5' },
     { kind: 'libplacebo', name: 'libplacebo', tagline: 'Anime4K 着色器 · 动漫实时超分', icon: Sparkles, accent: 'from-cyan-500/20 to-cyan-500/5' },
-    { kind: 'span', name: 'SPAN', tagline: '实拍首选 · 保真度最高 · 速度快', icon: Gauge, accent: 'from-emerald-500/20 to-emerald-500/5' },
-    { kind: 'realesrgan', name: 'Real-ESRGAN', tagline: '通用修复 · 适合低码率/退化源', icon: ImagePlus, accent: 'from-violet-500/20 to-violet-500/5' },
+    { kind: 'span', name: 'SPAN', tagline: '保真优先 · 不重建细节 · 观感偏软', icon: Gauge, accent: 'from-emerald-500/20 to-emerald-500/5' },
+    { kind: 'realesrgan', name: 'Real-ESRGAN', tagline: '细节重建 · 观感锐利 · 实拍常用之选', icon: ImagePlus, accent: 'from-violet-500/20 to-violet-500/5' },
     { kind: 'realcugan', name: 'Real-CUGAN', tagline: '动漫超分王者 · 结构保持最佳', icon: Layers, accent: 'from-fuchsia-500/20 to-fuchsia-500/5' },
     { kind: 'rife', name: 'RIFE 补帧', tagline: '帧率倍增 · 运动更丝滑', icon: Timer, accent: 'from-amber-500/20 to-amber-500/5' },
     { kind: 'realbasicvsr', name: 'RealBasicVSR', tagline: '重建档 · 时域稳定无闪烁 · 仅适合退化源', icon: Crown, accent: 'from-amber-400/20 to-orange-500/5', engine: 'pytorch' },
@@ -368,13 +368,13 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                 )}
 
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
-                    {p.kind === 'lanczos' && '纯 Lanczos 重采样，不含任何神经网络：不占显存、绝不产生伪影或"塑料感"。对高码率清晰源（如 8 Mbps 以上的现代 H.264/HEVC），实测重建保真度反而高于全部 Real-ESRGAN 模型——源没有丢失细节时，AI 的"脑补"只会偏离原貌。想要更锐一点可改用 SPAN。'}
+                    {p.kind === 'lanczos' && '纯 Lanczos 重采样，不含任何神经网络：不占显存、绝不产生伪影或"塑料感"。对高码率清晰源（如 8 Mbps 以上的现代 H.264/HEVC），逐像素保真度反而高于 Real-ESRGAN 系列——源没丢细节时 AI 的"脑补"只会偏离原貌。但保真高不等于好看：想要更清晰的观感，仍应试试 Real-ESRGAN。'}
                     {p.kind === 'lanczos' && ' 缩放本身的耗时可忽略（1383 帧加不加 Lanczos 都是 2 秒），因此无需 GPU 加速——实测走 CUDA 硬解+scale_cuda 的全 GPU 链路反而更慢。真正的瓶颈是编码器，占总耗时约 90%：换成 hevc_nvenc 可直接快一倍（详见「编码器」标签页）。'}
                     {p.kind === 'libplacebo' && 'libplacebo 需要显式指定输出分辨率；Anime4K 系列着色器对动漫/动画内容效果最好，速度极快。'}
-                    {p.kind === 'realesrgan' && 'realesr-animevideov3 支持 2/3/4×，为动漫视频训练；realesrgan-plus / nomos8k / realwebphoto 仅 4×；realesr-generalv3 仅 4× 但可启用 WDN 降噪变体；nomos8k-compact 仅 2×。缩放选项已按模型实际权重锁定。注意：这些模型均为 GAN 训练，会"再生"细节——源越糊收益越大，对已经清晰的高码率源反而可能不如 Lanczos / SPAN 忠实；真人素材请勿使用 animevideov3（会明显塑料化）。'}
+                    {p.kind === 'realesrgan' && 'realesr-animevideov3 支持 2/3/4×，为动漫视频训练；realesrgan-plus / nomos8k / realwebphoto 仅 4×；realesr-generalv3 仅 4× 但可启用 WDN 降噪变体；nomos8k-compact 仅 2×。缩放选项已按模型实际权重锁定。注意：这些模型均为 GAN 训练，会"再生"细节——源越糊收益越大，代价是不再逐像素忠实于原图，但观感往往更清晰锐利（实拍素材上 nomos8k-compact 与 animevideov3 的发丝/纹理重建明显优于 SPAN）。哪个更合眼缘因片源而异，建议实拍先试 nomos8k-compact，动漫用 animevideov3。'}
                     {p.kind === 'realcugan' && 'models-se 综合最佳（2× 时另有 1x/2x 精细降噪档）；models-pro 仅 2/3×；models-nose 仅 2× 且固定不降噪。降噪档位随 模型+倍率 联动。为动漫内容设计，真人素材建议改用 SPAN。2K 以上输出显存占用较高。'}
                     {p.kind === 'rife' && '补帧不改变分辨率；场景切换阈值越低检测越敏感（20 表示 20% 差异即判定切换），避免转场处产生伪影。可与 HDR 同用。'}
-                    {p.kind === 'span' && 'SPAN 仅支持 2× / 4×，模型体积最小、速度快（720p 输入实测约 12 fps）。偏保真而非"再生"细节，实测在真人实拍素材上重建保真度为全部可选模型最高、且是唯一优于纯 Lanczos 缩放的模型——人脸/浅景深/硬字幕场景不易产生塑料感与振铃，是实拍内容的首选。'}
+                    {p.kind === 'span' && 'SPAN 仅支持 2× / 4×，模型体积最小、速度快（720p 输入实测约 12 fps）。它是效率竞赛（NTIRE）出身的保真型模型：只做忠实放大、几乎不"再生"细节，因此不会有塑料感与振铃，但观感也偏软——头发、织物等高频区域可能糊成块状。合成退化的保真度测试里它得分最高，但那类测试恰好偏袒它这种训练方式；真实素材上不少人觉得不如 Real-ESRGAN 好看。建议在自己的片段上和 Real-ESRGAN 对比后再定。'}
                     {p.kind === 'realbasicvsr' && 'RealBasicVSR（Apache-2.0）通过双向循环传播 + SPyNet 光流对齐消除帧间闪烁，时序一致性好。但代价很高：720×1280 输入端到端实测约 1.4 fps，约为 Real-ESRGAN 4× 的 1/6、SPAN 2× 的 1/8。显存够时走整帧推理（画质最佳）；输入过大放不下会自动退化为空间分块，实测画质再降约 1.6 dB。仅在源确有明显退化（低码率、噪点、糊）时才值得；清晰源上收益很小。由独立 PyTorch 后端执行，仅编码器与 CRF 可调。'}
                     {p.kind === 'seedvr2' && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度 0.4 fps 量级（最慢档），支持断点续跑可分多次完成；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
                 </p>
