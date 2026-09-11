@@ -10,7 +10,7 @@ export function engineFor(kind: ProcessorKind): EngineKind {
     return PYTHON_PROCESSORS.includes(kind) ? 'python' : 'cli';
 }
 
-/** Python sidecar（worker.py）参数构建：仅编码器/CRF/分段/设备 生效 */
+/** Python sidecar（worker.py）参数构建：仅编码器/CRF/码率/分段/设备 生效 */
 export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: string): string[] {
     const p = req.processor;
     const enc = req.encoder;
@@ -20,6 +20,8 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
         // 旗舰引擎用 CUDA 编号空间（不可复用 Vulkan 的 deviceIndex，核显机上会错位）；
         // 旧持久化配置无此字段时回落 0
         '--device', `cuda:${req.advanced.cudaDeviceIndex ?? 0}`];
+    // 码率 > 0 时 worker 端切到码率控制并忽略 --crf（与 CLI 链路同一规则，见 buildArgsForFile）
+    if (enc.bitRate > 0) args.push('--bit-rate', String(enc.bitRate));
     if (p.kind === 'seedvr2') {
         args.push('--resolution', String(p.seedvr2Resolution > 0 ? p.seedvr2Resolution : 0));
     }
@@ -87,11 +89,17 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
     const codec = enc.codec === 'custom' ? enc.customCodec.trim() : enc.codec;
     if (codec) args.push('-c', codec);
     if (enc.pixFmt) args.push('--pix-fmt', enc.pixFmt);
-    if (enc.bitRate > 0) args.push('--bit-rate', String(enc.bitRate));
     if (!enc.copyAudio) args.push('--no-copy-audio-streams');
     if (!enc.copySubs) args.push('--no-copy-subtitle-streams');
     if (!enc.recalculatePts) args.push('--no-recalculate-pts');
-    for (const [k, v] of qualityOpts(codec, enc.crf)) args.push('-e', `${k}=${v}`);
+    // 码率控制与恒定质量互斥：x264/x265 等在同时收到 crf 与 bit_rate 时以 crf 为准、
+    // 静默丢弃码率（实测 crf=20 + 8 Mbps 产物 4.58 Mbps，与不设码率完全一致）。
+    // 因此设了码率就只发 --bit-rate，不再发任何质量档参数。
+    if (enc.bitRate > 0) {
+        args.push('--bit-rate', String(enc.bitRate));
+    } else {
+        for (const [k, v] of qualityOpts(codec, enc.crf)) args.push('-e', `${k}=${v}`);
+    }
     for (const opt of enc.extraOpts) {
         if (opt.key.trim()) args.push('-e', `${opt.key.trim()}=${opt.value.trim()}`);
     }

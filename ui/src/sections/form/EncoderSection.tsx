@@ -1,5 +1,6 @@
 import { Plus, X } from 'lucide-react';
 import { CODECS, PIX_FMTS } from '@/lib/args';
+import { cn } from '@/lib/utils';
 import type { JobRequest } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,13 @@ interface Props {
 export default function EncoderSection({ req, onChange, bare }: Props) {
     const enc = req.encoder;
     const setEnc = (patch: Partial<typeof enc>) => onChange({ encoder: { ...enc, ...patch } });
+    // 码率内部一律以 bps 存储（与 CLI --bit-rate 及已持久化的配置一致），仅界面按 Mbps 显示/输入
+    const bitRateMode = enc.bitRate > 0;
+    const bitRateMbps = enc.bitRate > 0 ? Math.round(enc.bitRate / 1e4) / 100 : 0;
+    const setBitRateMbps = (v: string) => {
+        const n = Number(v);
+        setEnc({ bitRate: Number.isFinite(n) && n > 0 ? Math.round(n * 1e6) : 0 });
+    };
 
     const addOpt = () => setEnc({ extraOpts: [...enc.extraOpts, { key: '', value: '' }] });
     const setOpt = (i: number, patch: Partial<{ key: string; value: string }>) => {
@@ -39,12 +47,18 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                     </Select>
                 </div>
                 <div>
-                    <Label className="mb-1.5 block text-xs text-muted-foreground">质量 CRF（-1 默认）</Label>
-                    <Input type="number" min={-1} max={51} value={enc.crf} onChange={(e) => setEnc({ crf: Number(e.target.value) })} className="h-9 bg-input/60 text-xs" title="恒定质量因子，越低越清晰，常用 15-23。会按所选编码器自动映射为 crf / cq / qvbr_quality_level" />
+                    <Label className={cn('mb-1.5 block text-xs', bitRateMode ? 'text-muted-foreground/50 line-through' : 'text-muted-foreground')}>质量 CRF（-1 默认）</Label>
+                    <Input type="number" min={-1} max={51} value={enc.crf} disabled={bitRateMode}
+                        onChange={(e) => setEnc({ crf: Number(e.target.value) })}
+                        className={cn('h-9 bg-input/60 text-xs', bitRateMode && 'opacity-40')}
+                        title={bitRateMode
+                            ? '已设码率：编码器进入码率控制模式，质量档不生效（两者互斥）。码率清零即恢复'
+                            : '恒定质量因子，越低越清晰，常用 15-23。会按所选编码器自动映射为 crf / cq / qvbr_quality_level'} />
                 </div>
                 <div>
-                    <Label className="mb-1.5 block text-xs text-muted-foreground">码率 bps（0 自动）</Label>
-                    <Input type="number" min={0} value={enc.bitRate} onChange={(e) => setEnc({ bitRate: Number(e.target.value) })} className="h-9 bg-input/60 text-xs" />
+                    <Label className="mb-1.5 block text-xs text-muted-foreground">码率 Mbps（0 = 按质量）</Label>
+                    <Input type="number" min={0} step={0.1} value={bitRateMbps} onChange={(e) => setBitRateMbps(e.target.value)} className="h-9 bg-input/60 text-xs"
+                        title="平均码率（ABR）。设为 0 时按左侧质量档编码；设了码率后质量档失效。参考：720p 短剧源约 2~8 Mbps，2K 输出 8~16 Mbps" />
                 </div>
                 <div>
                     <Label className="mb-1.5 block text-xs text-muted-foreground">像素格式</Label>
@@ -56,6 +70,14 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                     </Select>
                 </div>
             </div>
+
+            {bitRateMode && (
+                <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+                    <strong>码率控制模式</strong>：编码器按平均 {bitRateMbps} Mbps 输出（ABR），质量 CRF 已停用——两者互斥，
+                    同时给编码器只会按 CRF 编码并静默丢弃码率。码率改回 0 即恢复按质量档编码。
+                    注意 ABR 是"平均"码率：静态画面段会低于目标、复杂段会高于目标，整体均值贴近设定值。
+                </div>
+            )}
 
             {enc.codec === 'custom' && (
                 <div className="mt-3">

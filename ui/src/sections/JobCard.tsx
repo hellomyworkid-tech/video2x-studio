@@ -42,8 +42,12 @@ function summarizeArgs(args: string[]): string {
         if (ri2 >= 0 && args[ri2 + 1] !== '0') parts.push(`短边 ${args[ri2 + 1]}p`);
         const ci = args.indexOf('--codec');
         if (ci >= 0) parts.push(args[ci + 1]);
-        const ri = args.indexOf('--crf');
-        if (ri >= 0) parts.push(`crf ${args[ri + 1]}`);
+        const bi = args.indexOf('--bit-rate');
+        if (bi >= 0) parts.push(`${Number(args[bi + 1]) / 1e6} Mbps`);
+        else {
+            const ri = args.indexOf('--crf');
+            if (ri >= 0) parts.push(`crf ${args[ri + 1]}`);
+        }
         return parts.join(' · ');
     }
     const idx = args.indexOf('-p');
@@ -60,6 +64,8 @@ function summarizeArgs(args: string[]): string {
     if (m >= 0) parts.push(`${args[m + 1]}× 帧率`);
     const c = args.indexOf('-c');
     if (c >= 0) parts.push(args[c + 1]);
+    const b = args.indexOf('--bit-rate');
+    if (b >= 0) parts.push(`${Number(args[b + 1]) / 1e6} Mbps`);
     return parts.join(' · ');
 }
 

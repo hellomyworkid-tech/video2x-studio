@@ -1350,10 +1350,15 @@ const server = http.createServer(async (req, res) => {
             // 注意：explorer 的 /select 对 UNC 网络路径（\\server\...）解析失败
             // 会静默打开"文档"，因此网络路径一律改为直接打开所在目录。
             const isUnc = job.outPath.startsWith('\\\\');
+            // 路径含空格时 Node 会把整个参数包成 "/select,C:\a b\x.mp4"，explorer 解析不了，
+            // 同样静默退回"文档"。改为 windowsVerbatimArguments 手动拼命令行：
+            // 只给路径加引号，/select, 前缀留在引号外（实测含空格/中文两种形态均正确定位）。
             const target = !isUnc && fs.existsSync(job.outPath)
-                ? '/select,' + job.outPath
-                : path.dirname(job.outPath);
-            const child = spawn('explorer.exe', [target], { detached: true, stdio: 'ignore' });
+                ? `/select,"${job.outPath}"`
+                : `"${path.dirname(job.outPath)}"`;
+            const child = spawn('explorer.exe', [target], {
+                detached: true, stdio: 'ignore', windowsVerbatimArguments: true,
+            });
             child.on('error', () => {}); // explorer 退出码不规范，忽略
             child.unref();
             return send(res, 200, { ok: true });

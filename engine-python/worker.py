@@ -219,13 +219,17 @@ def probe(path):
     }
 
 
-def quality_args(codec, crf):
+def quality_args(codec, crf, bit_rate=0):
     """恒定质量参数名因编码器而异；发错了 ffmpeg 只 warning 后静默忽略，
     任务照常完成但质量控制失效（实测 hevc_nvenc 用 -crf 产物比用 -cq 大 15%）。
       crf                —— libx264 / libx265 / libaom-av1 / libvpx-vp9 等
       cq                 —— *_nvenc（N 卡硬编）
       qvbr_quality_level —— *_amf（A 卡硬编），需同时把 rc 切到 qvbr
+    码率 > 0 时切到码率控制（-b:v）并且不发任何质量档参数：x264/x265 同时收到
+    crf 与码率时以 crf 为准、静默丢弃码率，两者必须互斥（与 UI/CLI 链路同一规则）。
     """
+    if bit_rate and int(bit_rate) > 0:
+        return ['-b:v', str(int(bit_rate))]
     c = str(codec or '')
     if c.endswith('_nvenc'):
         return ['-cq', str(crf)]
@@ -246,6 +250,8 @@ def main():
     ap.add_argument('-o', '--output', required=True)
     ap.add_argument('--codec', default='libx264')
     ap.add_argument('--crf', type=int, default=18)
+    ap.add_argument('--bit-rate', type=int, default=0,
+                    help='平均码率 bps；>0 时进入码率控制并忽略 --crf')
     ap.add_argument('--chunk', type=int, default=CHUNK_AUTO,
                     help='时间分块长度（帧）；不传则按显存自适应')
     ap.add_argument('--tile', type=int, default=-1,
@@ -522,7 +528,8 @@ def main():
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24',
                    '-s', f'{OW}x{OH}', '-r', fps_str, '-i', 'pipe:0',
-                   '-an', '-c:v', args.codec, *quality_args(args.codec, args.crf),
+                   '-an', '-c:v', args.codec,
+                   *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
                    '-pix_fmt', 'yuv420p', seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)

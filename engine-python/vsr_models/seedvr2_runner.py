@@ -256,7 +256,8 @@ def main(args):
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24',
                    '-s', f'{oW}x{oH}', '-r', fps_str, '-i', 'pipe:0',
-                   '-an', '-c:v', args.codec, *quality_args(args.codec, args.crf),
+                   '-an', '-c:v', args.codec,
+                   *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
                    '-pix_fmt', 'yuv420p', seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)
@@ -453,6 +454,7 @@ if __name__ == '__main__':
     ap.add_argument('-o', '--output', required=True)
     ap.add_argument('--codec', default='libx264')
     ap.add_argument('--crf', type=int, default=18)
+    ap.add_argument('--bit-rate', type=int, default=0, help='平均码率 bps；>0 时进入码率控制并忽略 --crf')
     ap.add_argument('--resolution', type=int, default=0, help='目标短边像素（0=输入短边×4）')
     ap.add_argument('--segment', type=int, default=121, help='模型内部时序段帧数')
     ap.add_argument('--seg-len', type=int, default=240, help='断点续跑宏分片长度（帧）')
