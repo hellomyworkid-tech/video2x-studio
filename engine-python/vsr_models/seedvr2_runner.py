@@ -53,6 +53,35 @@ def compute_output_dims(w0, h0, resolution):
     return oW, oH, pW, pH
 
 
+ATTN_MODES = ('sdpa', 'sageattn_2', 'sageattn_3', 'flash_attn_2', 'flash_attn_3')
+
+
+def pick_attention_mode(device='cuda:0'):
+    """按已安装的加速库选择注意力后端；全部未装时为 PyTorch 原生 SDPA（当前便携包即如此）。
+    优先级：SageAttention 2（官方称精度优于 v3，画质优先）> SageAttention 3（仅 Blackwell）
+    > FlashAttention 3（仅 Hopper）> FlashAttention 2 > SDPA。
+    环境变量 V2X_SEEDVR2_ATTN 可强制指定（取值见 ATTN_MODES），便于对比测速。
+    """
+    forced = os.environ.get('V2X_SEEDVR2_ATTN', '').strip().lower()
+    if forced in ATTN_MODES:
+        return forced, '环境变量指定'
+    try:
+        import torch
+        from src.optimization import compatibility as compat
+        major = torch.cuda.get_device_capability(device)[0] if torch.cuda.is_available() else 0
+    except Exception:
+        return 'sdpa', '加速库检测失败'
+    if compat.SAGE_ATTN_2_AVAILABLE:
+        return 'sageattn_2', '检测到 SageAttention 2'
+    if compat.SAGE_ATTN_3_AVAILABLE and major >= 10:
+        return 'sageattn_3', '检测到 SageAttention 3（Blackwell）'
+    if compat.FLASH_ATTN_3_AVAILABLE and major == 9:
+        return 'flash_attn_3', '检测到 FlashAttention 3（Hopper）'
+    if compat.FLASH_ATTN_2_AVAILABLE:
+        return 'flash_attn_2', '检测到 FlashAttention 2'
+    return 'sdpa', '未安装 SageAttention / FlashAttention'
+
+
 def pick_memory_strategy(device='cuda:0'):
     """按可用显存选 BlockSwap / VAE tiling 策略（可被 --blocks-to-swap 覆盖）。
 
@@ -114,6 +143,8 @@ def main(args):
     log(f'显存策略: blocks_to_swap={blocks}, swap_io={mem["swap_io"]}, '
         f'VAE tiling enc={mem["enc_tiled"]}/dec={mem["dec_tiled"]}({mem["tile"]}), '
         f'conv3d绕路={conv3d_wa}')
+    attn_mode, attn_why = pick_attention_mode(dev)
+    log(f'注意力后端: {attn_mode}（{attn_why}）')
 
     # ------------------------------------------------------------------
     # 断点续跑：宏分片 + 检查点（协议与 worker.py RealBasicVSR 一致）
@@ -196,7 +227,7 @@ def main(args):
             decode_tiled=mem['dec_tiled'],
             decode_tile_size=(mem['tile'], mem['tile']),
             decode_tile_overlap=(mem['tile'] // 8, mem['tile'] // 8),
-            attention_mode='sdpa')
+            attention_mode=attn_mode)
         ctx['cache_context'] = cache_context
         ctx['text_embeds'] = load_text_embeddings(
             str(script_directory), ctx['dit_device'], ctx['compute_dtype'], debug)
