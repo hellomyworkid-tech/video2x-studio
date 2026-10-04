@@ -151,6 +151,16 @@ export interface AssetDownloadState {
 
 export interface AssetsState extends AssetDownloadState {
     assets: AssetStatus[];
+    install?: InstallStatus;
+}
+
+/** 程序本体完整性：随便携包分发、不提供下载的运行时文件（CLI / Python / FFmpeg / 模型目录） */
+export interface InstallStatus {
+    complete: boolean;
+    /** false：未在 exe 附近找到 video2x.exe，根目录已回退 */
+    rootFound: boolean;
+    root: string;
+    missing: string[];
 }
 
 export interface PrecheckWarning {

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Ban, CheckCircle2, CircleDashed, Film, Loader2, Play, Plus, Trash2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import type { AssetsState, Job } from '@/types';
+import type { AssetsState, InstallStatus, Job } from '@/types';
 import { api } from '@/lib/api';
 import JobCard from '@/sections/JobCard';
 import AssetBanner from '@/sections/AssetBanner';
+import InstallBanner from '@/sections/InstallBanner';
 import { Button } from '@/components/ui/button';
 import {
     AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -14,6 +15,8 @@ import {
 interface Props {
     jobs: Job[];
     assetState: AssetsState | null;
+    /** 程序本体不完整时以红色错误条替代组件下载横幅 */
+    install: InstallStatus | null;
     onNewJob: () => void;
     onAbort: (id: number) => void;
 }
@@ -24,7 +27,7 @@ function fmtSize(bytes: number): string {
     return Math.max(1, Math.round(bytes / 1024)) + ' KB';
 }
 
-export default function QueueView({ jobs, assetState, onNewJob, onAbort }: Props) {
+export default function QueueView({ jobs, assetState, install, onNewJob, onAbort }: Props) {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [summary, setSummary] = useState<{ doneCount: number; unfinCount: number; unfinSize: number; resumeCount: number } | null>(null);
     const running = jobs.filter((j) => j.status === 'running');
@@ -144,7 +147,9 @@ export default function QueueView({ jobs, assetState, onNewJob, onAbort }: Props
                         </div>
                     ))}
                 </div>
-                <AssetBanner state={assetState} />
+                {install && !install.complete
+                    ? <InstallBanner install={install} />
+                    : <AssetBanner state={assetState} />}
             </div>
 
             {/* 任务列表：仅此区域内部滚动 */}

@@ -15,29 +15,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Project root resolution order:
 // 1. VIDEO2X_PROJECT_ROOT env
-// 2. walk up from the portable-exe dir / cwd / exec dir looking for the CLI
-// 3. dev fallback: ui/server/../..
+// 2. walk up from the portable-exe dir / exec dir / cwd looking for the CLI
+//    （exe 所在目录优先：从别的目录用命令行或快捷方式启动时，cwd 可能落在另一份
+//     源码树里，先查 cwd 会静默用错整套运行时）
+// 3. dev fallback: ui/server/../..（rootFound=false：便携包缺文件时走到这里，
+//    界面据此明确提示"程序文件不完整"，而不是误导用户去下载权重）
 function findProjectRoot() {
     if (process.env.VIDEO2X_PROJECT_ROOT) {
-        return path.resolve(process.env.VIDEO2X_PROJECT_ROOT);
+        return { root: path.resolve(process.env.VIDEO2X_PROJECT_ROOT), found: true };
     }
     const cliRel = path.join('build-desktop', 'Release', 'video2x.exe');
     const starts = [];
     if (process.env.PORTABLE_EXECUTABLE_DIR) starts.push(process.env.PORTABLE_EXECUTABLE_DIR);
-    starts.push(process.cwd(), path.dirname(process.execPath));
+    starts.push(path.dirname(process.execPath), process.cwd());
     for (const start of starts) {
         let dir = path.resolve(start);
         for (let i = 0; i < 6; i++) {
-            if (fs.existsSync(path.join(dir, cliRel))) return dir;
+            if (fs.existsSync(path.join(dir, cliRel))) return { root: dir, found: true };
             const parent = path.dirname(dir);
             if (parent === dir) break;
             dir = parent;
         }
     }
-    return path.resolve(__dirname, '..', '..');
+    return { root: path.resolve(__dirname, '..', '..'), found: false };
 }
 
-const PROJECT_ROOT = findProjectRoot();
+const { root: PROJECT_ROOT, found: PROJECT_ROOT_FOUND } = findProjectRoot();
 const PORT = Number(process.env.BRIDGE_PORT || 7199);
 // Static frontend (production): built by `vite build` into ui/dist
 const STATIC_DIR =
@@ -72,6 +75,20 @@ function pythonEngineStatus() {
         realbasicvsrWeights: fs.existsSync(PY_WEIGHTS.realbasicvsr),
         seedvr2Weights: fs.existsSync(PY_WEIGHTS.seedvr2),
     };
+}
+
+// 程序本体（随便携包分发、不提供下载）是否完整。缺任何一项都意味着拷贝/打包不完整，
+// 下载权重无法补救——界面据此显示红色错误条并隐藏"立即下载"
+function installStatus() {
+    const core = [
+        path.join('build-desktop', 'Release', 'video2x.exe'),
+        path.join('build-desktop', 'Release', 'libvideo2x.dll'),
+        path.join('third_party', 'ffmpeg-shared', 'bin', 'ffmpeg.exe'),
+        path.join('models', 'realesrgan'),
+    ];
+    const missing = core.filter((rel) => !fs.existsSync(path.join(PROJECT_ROOT, rel)));
+    if (!fs.existsSync(PYTHON_EXE)) missing.push(path.relative(PROJECT_ROOT, PYTHON_BUNDLED));
+    return { complete: missing.length === 0, rootFound: PROJECT_ROOT_FOUND, root: PROJECT_ROOT, missing };
 }
 
 const FFPROBE = path.join(PROJECT_ROOT, 'third_party', 'ffmpeg-shared', 'bin', 'ffprobe.exe');
@@ -286,6 +303,11 @@ async function downloadTo(url, destAbs, onProgress) {
 
 function verifyCheckpoint(ckptAbs, spynetAbs) {
     return new Promise((resolve) => {
+        // Python 运行时缺失时 execFile 报 ENOENT，曾被当成"校验失败"而删掉刚下好的权重
+        if (!fs.existsSync(PYTHON_EXE)) {
+            resolve({ ok: true, skipped: true, detail: 'Python 运行时缺失，已跳过加载验证' });
+            return;
+        }
         const script = path.join(PROJECT_ROOT, 'engine-python', 'verify_ckpt.py');
         execFile(PYTHON_EXE, [script, ckptAbs, spynetAbs || '-'],
             // 大权重 torch.load 在慢盘/杀软扫描下可能较久，超时给到 10 分钟
@@ -986,6 +1008,7 @@ const server = http.createServer(async (req, res) => {
                 cliPath: CLI_PATH,
                 cliExists: fs.existsSync(CLI_PATH),
                 projectRoot: PROJECT_ROOT,
+                install: installStatus(),
                 staticDir: STATIC_DIR,
                 staticDirExists: fs.existsSync(STATIC_DIR),
                 pythonEngine: pythonEngineStatus(),
@@ -1424,6 +1447,7 @@ const server = http.createServer(async (req, res) => {
                 ...dlState,
                 assets: assetsStatus(),
                 pythonExe: { path: PYTHON_EXE, exists: fs.existsSync(PYTHON_EXE) },
+                install: installStatus(),
             });
         }
 
@@ -1433,6 +1457,11 @@ const server = http.createServer(async (req, res) => {
             const asset = ASSETS.find((a) => a.id === body.id);
             if (!asset) return send(res, 404, { error: '未知组件' });
             if (dlState.active) return send(res, 409, { error: '已有下载任务进行中' });
+            if (!fs.existsSync(PYTHON_EXE)) {
+                return send(res, 409, {
+                    error: '程序文件不完整：缺少 Python 运行时，下载权重无法解决，请重新完整复制整个程序文件夹',
+                });
+            }
             if (asset.files.every((f) => assetFileStatus(f).ok)) {
                 return send(res, 200, { ok: true, already: true });
             }
@@ -1629,7 +1658,9 @@ if (jobOrder.length > 0) {
 
 server.listen(PORT, '127.0.0.1', () => {
     console.log(`[bridge] Video2X Studio bridge listening on http://127.0.0.1:${PORT}`);
-    console.log(`[bridge] PROJECT_ROOT: ${PROJECT_ROOT}`);
+    console.log(`[bridge] PROJECT_ROOT: ${PROJECT_ROOT}${PROJECT_ROOT_FOUND ? '' : '（未找到 video2x.exe，已回退）'}`);
+    const inst = installStatus();
+    if (!inst.complete) console.warn(`[bridge] 程序文件不完整，缺少：${inst.missing.join(', ')}`);
     console.log(`[bridge] CLI: ${CLI_PATH} (exists=${fs.existsSync(CLI_PATH)})`);
     console.log(`[bridge] STATIC_DIR: ${STATIC_DIR} (exists=${fs.existsSync(STATIC_DIR)})`);
 });

@@ -28,6 +28,14 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
     return args;
 }
 
+/**
+ * 指定分辨率向上取偶数：yuv420p 等 4:2:0 格式要求宽高为偶数，奇数时 libx264 直接报错
+ * 退出、NVENC 则静默改尺寸。统一在此取偶，行为可预期。
+ */
+export function evenUp(n: number): number {
+    return n % 2 === 0 ? n : n + 1;
+}
+
 export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath: string): string[] {
     const args: string[] = ['-i', inputPath, '-o', outputPath];
     // Clamp processor params to the selected model's real capabilities first,
@@ -47,13 +55,13 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
     if (p.kind === 'lanczos') {
         // 纯缩放：倍率模式发 -s，指定分辨率模式发 -w/-h（CLI 两者都支持）
         if (p.sizeMode === 'explicit') {
-            args.push('-w', String(p.width), '-h', String(p.height));
+            args.push('-w', String(evenUp(p.width)), '-h', String(evenUp(p.height)));
         } else {
             args.push('-s', String(p.scaleFactor));
         }
     } else if (p.kind === 'libplacebo') {
         args.push('--libplacebo-shader', p.shader);
-        args.push('-w', String(p.width), '-h', String(p.height));
+        args.push('-w', String(evenUp(p.width)), '-h', String(evenUp(p.height)));
     } else if (p.kind === 'realesrgan') {
         args.push('--realesrgan-model', p.realesrganModel);
         args.push('-s', String(p.scaleFactor));

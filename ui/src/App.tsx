@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AssetsState, GpuDevice, Job, PythonEngineStatus } from '@/types';
+import type { AssetsState, GpuDevice, InstallStatus, Job, PythonEngineStatus } from '@/types';
 import { api, subscribeAssets, subscribeJobs } from '@/lib/api';
 import TitleBar from '@/sections/TitleBar';
 import NavRail from '@/sections/NavRail';
@@ -16,6 +16,7 @@ export default function App() {
     const [cudaDevices, setCudaDevices] = useState<GpuDevice[]>([]);
     const [cliReady, setCliReady] = useState<boolean | null>(null);
     const [pyEngine, setPyEngine] = useState<PythonEngineStatus | null>(null);
+    const [install, setInstall] = useState<InstallStatus | null>(null);
     const [assetState, setAssetState] = useState<AssetsState | null>(null);
     // 每次进入新建视图都重置表单
     const [newJobKey, setNewJobKey] = useState(0);
@@ -27,6 +28,7 @@ export default function App() {
             .then((h) => {
                 setCliReady(h.cliExists);
                 setPyEngine(h.pythonEngine ?? null);
+                setInstall(h.install ?? null);
             })
             .catch(() => setCliReady(false));
         api.devices().then((d) => setDevices(d.devices)).catch(() => {});
@@ -62,6 +64,7 @@ export default function App() {
                         <QueueView
                             jobs={jobs}
                             assetState={assetState}
+                            install={install}
                             onNewJob={() => {
                                 setNewJobKey((k) => k + 1);
                                 setView('new-job');
@@ -75,6 +78,7 @@ export default function App() {
                             cudaDevices={cudaDevices}
                             cliReady={cliReady === true}
                             pyReady={pyReady}
+                            install={install}
                             onSubmitted={() => setView('queue')}
                             onCancel={() => setView('queue')}
                         />

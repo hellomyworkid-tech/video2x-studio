@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, FolderOpen, History, Info, Loader2, Rocket, R
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { buildArgsForFile, buildOutputPath, buildPythonArgs, defaultJobRequest, engineFor } from '@/lib/args';
-import type { GpuDevice, JobRequest, PrecheckWarning } from '@/types';
+import type { GpuDevice, InstallStatus, JobRequest, PrecheckWarning } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,8 @@ interface Props {
     cudaDevices: GpuDevice[];
     cliReady: boolean;
     pyReady: boolean;
+    /** 程序本体完整性（null = 尚未检测完） */
+    install: InstallStatus | null;
     onSubmitted: () => void;
     onCancel: () => void;
 }
@@ -99,7 +101,7 @@ function summarizeConfig(req: JobRequest): string {
     return parts.join('　|　');
 }
 
-export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, onSubmitted, onCancel }: Props) {
+export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, install, onSubmitted, onCancel }: Props) {
     const [req, setReq] = useState<JobRequest>(() => loadSavedConfig() ?? defaultJobRequest());
     const [submitting, setSubmitting] = useState(false);
     const [prechecking, setPrechecking] = useState(false);
@@ -120,14 +122,29 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, on
     const isPython = engineFor(req.processor.kind) === 'python';
     const engineOk = isPython ? pyReady : cliReady;
 
-    const canSubmit =
-        engineOk &&
-        req.files.length > 0 &&
-        req.outputDir.trim().length > 0 &&
-        !(req.processor.kind === 'libplacebo' && (req.processor.width <= 0 || req.processor.height <= 0)) &&
-        !(req.processor.kind === 'lanczos' && req.processor.sizeMode === 'explicit'
-            && (req.processor.width <= 0 || req.processor.height <= 0)) &&
-        !(req.encoder.codec === 'custom' && req.encoder.customCodec.trim() === '');
+    // 不可提交的原因（按优先级取第一条）：按钮变灰时必须告诉用户为什么——
+    // 程序文件不完整的机器上，此前只有一个灰按钮，用户无从判断问题出在哪
+    const blockReason: string | null = (() => {
+        if (install && !install.complete) {
+            return `程序文件不完整（缺少 ${install.missing[0]}${install.missing.length > 1 ? ` 等 ${install.missing.length} 项` : ''}），请重新完整复制程序文件夹`;
+        }
+        if (!engineOk) {
+            return isPython
+                ? 'PyTorch 重建档未就绪：缺少 Python 运行时或模型权重（见队列页顶部提示）'
+                : 'ncnn 引擎未就绪：找不到 video2x.exe';
+        }
+        if (req.files.length === 0 && !req.outputDir.trim()) return '请先添加视频文件并选择输出目录';
+        if (req.files.length === 0) return '请先添加视频文件';
+        if (!req.outputDir.trim()) return '请选择输出目录';
+        const needsSize = req.processor.kind === 'libplacebo'
+            || (req.processor.kind === 'lanczos' && req.processor.sizeMode === 'explicit');
+        if (needsSize && (req.processor.width <= 0 || req.processor.height <= 0)) return '请填写输出宽度和高度';
+        if (req.encoder.codec === 'custom' && req.encoder.customCodec.trim() === '') return '请填写自定义编码器名';
+        return null;
+    })();
+    const canSubmit = blockReason === null;
+    // 环境问题（程序文件 / 引擎）醒目提示；"还没选文件"之类的常规引导保持低调
+    const blockIsFault = (install !== null && !install.complete) || !engineOk;
 
     const previewCmd = useMemo(() => {
         if (req.files.length === 0 || !req.outputDir.trim()) return null;
@@ -315,16 +332,18 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, on
             <div className="shrink-0 border-t border-border/70 bg-background/85 px-6 py-3 backdrop-blur-xl">
                 <div className="mx-auto flex max-w-4xl items-center gap-4">
                     <div className="min-w-0 flex-1">
-                        {previewCmd ? (
+                        {blockReason ? (
+                            <div className={cn('flex items-center gap-1.5 text-xs', blockIsFault ? 'text-amber-300' : 'text-muted-foreground')}>
+                                {blockIsFault
+                                    ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                    : <FolderOpen className="h-3.5 w-3.5 shrink-0" />}
+                                <span className="truncate" title={blockReason}>{blockReason}</span>
+                            </div>
+                        ) : previewCmd ? (
                             <div className="truncate font-mono text-[10.5px] text-muted-foreground" title={previewCmd}>
                                 {previewCmd}
                             </div>
-                        ) : (
-                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                <FolderOpen className="h-3.5 w-3.5" />
-                                请先添加视频文件并选择输出目录
-                            </div>
-                        )}
+                        ) : null}
                     </div>
                     <Button
                         onClick={submit}

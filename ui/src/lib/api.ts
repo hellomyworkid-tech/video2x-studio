@@ -1,7 +1,7 @@
 // API client + SSE job stream for Video2X Studio
 
 import type {
-    AssetsState, GpuDevice, Job, JobRequest, PrecheckResponse, PythonEngineStatus,
+    AssetsState, GpuDevice, InstallStatus, Job, JobRequest, PrecheckResponse, PythonEngineStatus,
 } from '@/types';
 import { buildArgsForFile, buildOutputPath, buildPythonArgs, engineFor } from '@/lib/args';
 
@@ -16,6 +16,7 @@ export const api = {
     health: () => jsonFetch<{
         ok: boolean; cliPath: string; cliExists: boolean;
         pythonEngine: PythonEngineStatus;
+        install?: InstallStatus;
     }>('/api/health'),
 
     devices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/devices'),
