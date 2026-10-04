@@ -1,4 +1,4 @@
-import { Crown, Gauge, Gem, ImagePlus, Layers, Scaling, Sparkles, Timer } from 'lucide-react';
+import { Crown, Gauge, Gem, ImagePlus, Layers, Rocket, Scaling, Sparkles, Timer } from 'lucide-react';
 import {
     capsFor, CUGAN_NOISE_LABELS, normalizeProcessor, recommendedCrf,
     REALCUGAN_MODELS, REALESRGAN_MODELS, RIFE_MODELS, SHADERS, SPAN_MODELS,
@@ -33,6 +33,7 @@ const PROCESSORS: {
     { kind: 'rife', name: 'RIFE 补帧', tagline: '帧率倍增 · 运动更丝滑', icon: Timer, accent: 'from-amber-500/20 to-amber-500/5' },
     { kind: 'realbasicvsr', name: 'RealBasicVSR', tagline: '重建档 · 时域稳定无闪烁 · 仅适合退化源', icon: Crown, accent: 'from-amber-400/20 to-orange-500/5', engine: 'pytorch' },
     { kind: 'seedvr2', name: 'SeedVR2', tagline: '重建档 · 退化源画质天花板 · 极慢', icon: Gem, accent: 'from-indigo-500/20 to-indigo-500/5', engine: 'pytorch' },
+    { kind: 'swiftvr', name: 'SwiftVR', tagline: '重建档 · 生成式修复 · 比 SeedVR2 快约 15 倍 · 需 16GB 显存', icon: Rocket, accent: 'from-sky-500/20 to-sky-500/5', engine: 'pytorch' },
 ];
 
 const RES_PRESETS = [
@@ -77,7 +78,7 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
     return (
         <SectionCard step="02" title="处理器" desc="选择核心引擎与模型——决定画质/速度的基本盘" bare={bare}>
             {/* processor cards：单行紧凑排列，说明文字进悬停提示 */}
-            <div className="mb-3 grid grid-cols-8 gap-1.5">
+            <div className="mb-3 grid grid-cols-9 gap-1.5">
                 {PROCESSORS.map((proc) => {
                     const active = p.kind === proc.kind;
                     return (
@@ -96,9 +97,9 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                             <proc.icon className={cn('h-4.5 w-4.5 h-[18px] w-[18px]', active ? 'text-cyan-300' : 'text-muted-foreground')} />
                             <span className={cn('text-[11px] font-bold leading-tight', active && 'text-cyan-200')}>{proc.name}</span>
                             {proc.engine === 'pytorch' && (
-                                <span className="rounded bg-amber-500/15 px-1 py-px text-[8.5px] font-semibold leading-tight text-amber-300/90">
-                                    {/* SeedVR2 是目标分辨率模式，不是固定 ×4 */}
-                                    {proc.kind === 'seedvr2' ? 'PyTorch 目标分辨率' : 'PyTorch ×4'}
+                                <span className="whitespace-nowrap rounded bg-amber-500/15 px-1 py-px text-[8.5px] font-semibold leading-tight text-amber-300/90">
+                                    {/* SeedVR2 / SwiftVR 是目标分辨率模式，不是固定 ×4 */}
+                                    {proc.kind === 'realbasicvsr' ? 'PyTorch ×4' : 'PyTorch 可调尺寸'}
                                 </span>
                             )}
                             {active && (
@@ -367,6 +368,26 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                     </div>
                 )}
 
+                {p.kind === 'swiftvr' && (
+                    <div className="flex flex-wrap items-end gap-3">
+                        <div className="w-[230px]">
+                            <Label className="mb-1.5 block text-xs text-muted-foreground">目标短边分辨率</Label>
+                            <Select value={String(p.swiftvrResolution)} onValueChange={(v) => setP({ swiftvrResolution: Number(v) })}>
+                                <SelectTrigger className="h-9 bg-input/60 text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="0" className="text-xs">自动（输入短边 ×2，最高 1440）</SelectItem>
+                                    {[720, 960, 1080, 1440].map((r) => (
+                                        <SelectItem key={r} value={String(r)} className="text-xs">{r}p 短边</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex h-9 items-center rounded-md border border-border/60 bg-secondary/30 px-3 text-[11px] text-muted-foreground">
+                            需 16GB 级显存 · FP8 权重约 5GB 常驻 · 断点续跑 · 显存不足自动减小分段重试
+                        </div>
+                    </div>
+                )}
+
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
                     {p.kind === 'lanczos' && '纯 Lanczos 重采样，不含任何神经网络：不占显存、绝不产生伪影或"塑料感"。对高码率清晰源（如 8 Mbps 以上的现代 H.264/HEVC），逐像素保真度反而高于 Real-ESRGAN 系列——源没丢细节时 AI 的"脑补"只会偏离原貌。但保真高不等于好看：想要更清晰的观感，仍应试试 Real-ESRGAN。'}
                     {p.kind === 'lanczos' && ' 缩放本身的耗时可忽略（1383 帧加不加 Lanczos 都是 2 秒），因此无需 GPU 加速——实测走 CUDA 硬解+scale_cuda 的全 GPU 链路反而更慢。真正的瓶颈是编码器，占总耗时约 90%：换成 hevc_nvenc 可直接快一倍（详见「编码器」标签页）。'}
@@ -375,10 +396,11 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                     {p.kind === 'realcugan' && 'models-se 综合最佳（2× 时另有 1x/2x 精细降噪档）；models-pro 仅 2/3×；models-nose 仅 2× 且固定不降噪。降噪档位随 模型+倍率 联动。为动漫内容设计，真人素材建议改用 SPAN。2K 以上输出显存占用较高。'}
                     {p.kind === 'rife' && '补帧不改变分辨率；场景切换阈值越低检测越敏感（20 表示 20% 差异即判定切换），避免转场处产生伪影。可与 HDR 同用。'}
                     {p.kind === 'span' && 'SPAN 仅支持 2× / 4×，模型体积最小、速度快（720p 输入实测约 12 fps）。它是效率竞赛（NTIRE）出身的保真型模型：只做忠实放大、几乎不"再生"细节，因此不会有塑料感与振铃，但观感也偏软——头发、织物等高频区域可能糊成块状。合成退化的保真度测试里它得分最高，但那类测试恰好偏袒它这种训练方式；真实素材上不少人觉得不如 Real-ESRGAN 好看。建议在自己的片段上和 Real-ESRGAN 对比后再定。'}
-                    {p.kind === 'realbasicvsr' && 'RealBasicVSR（Apache-2.0）通过双向循环传播 + SPyNet 光流对齐消除帧间闪烁，时序一致性好。但代价很高：720×1280 输入端到端实测约 1.4 fps，约为 Real-ESRGAN 4× 的 1/6、SPAN 2× 的 1/8。显存够时走整帧推理（画质最佳）；输入过大放不下会自动退化为空间分块，实测画质再降约 1.6 dB。仅在源确有明显退化（低码率、噪点、糊）时才值得；清晰源上收益很小。由独立 PyTorch 后端执行，仅编码器与 CRF 可调。'}
-                    {p.kind === 'seedvr2' && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度 0.4 fps 量级（最慢档），支持断点续跑可分多次完成；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
+                    {p.kind === 'realbasicvsr' && 'RealBasicVSR（Apache-2.0）通过双向循环传播 + SPyNet 光流对齐消除帧间闪烁，时序一致性好。但代价很高：720×1280 输入端到端实测约 1.4 fps，约为 Real-ESRGAN 4× 的 1/6、SPAN 2× 的 1/8。显存够时走整帧推理（画质最佳）；输入过大放不下会自动退化为空间分块，实测画质再降约 1.6 dB。仅在源确有明显退化（低码率、噪点、糊）时才值得；清晰源上收益很小。由独立 PyTorch 后端执行，编码器、CRF、码率、像素格式可调。'}
+                    {p.kind === 'swiftvr' && 'SwiftVR（2026 年 6 月开源，Apache-2.0，Wan2.2-5B 底座）单步流式生成式视频修复。RTX 5070 Ti 实测：720p → 2560×1440 端到端约 4 fps，约为 SeedVR2 的 16 倍、nomos8k-compact 的 1/4；静止背景的帧间稳定性在 AI 方法中最好（接近 Lanczos），实测也没有出现 SeedVR2 那样改变脸型的问题。生成式模型会补出原片没有的细节（发茬、皮肤纹理、发丝），强退化素材收益最大；清晰源上可能"补"得过头。需要 16GB 级显存：权重做了仅权重 FP8 量化（约 5GB 常驻，与原精度输出差异 PSNR≈50dB，肉眼不可辨）。'}
+                    {p.kind === 'seedvr2' && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度最慢：RTX 5070 Ti 实测 2560×1440 输出约 0.25 fps，支持断点续跑可分多次完成；实测在部分人脸上会改变脸型；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
                 </p>
-                {(p.kind === 'realbasicvsr' || p.kind === 'seedvr2') && (
+                {(p.kind === 'realbasicvsr' || p.kind === 'seedvr2' || p.kind === 'swiftvr') && (
                     <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-200/90">
                         重建档引擎是为<strong>严重退化</strong>素材设计的（老片、极低码率、强压缩、模糊）。
                         若源本身码率高、画面干净，它们不仅慢几十倍，画质也可能不如 Lanczos / SPAN——

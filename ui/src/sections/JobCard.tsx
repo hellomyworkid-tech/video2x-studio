@@ -37,7 +37,8 @@ function summarizeArgs(args: string[]): string {
     const mi = args.indexOf('--model');
     if (mi >= 0) {
         const model = args[mi + 1];
-        parts.push(model === 'realbasicvsr' ? 'RealBasicVSR ×4' : model === 'seedvr2' ? 'SeedVR2 短边×4' : model);
+        parts.push(model === 'realbasicvsr' ? 'RealBasicVSR ×4'
+            : model === 'seedvr2' ? 'SeedVR2 短边×4' : model === 'swiftvr' ? 'SwiftVR 短边×2' : model);
         const ri2 = args.indexOf('--resolution');
         if (ri2 >= 0 && args[ri2 + 1] !== '0') parts.push(`短边 ${args[ri2 + 1]}p`);
         const ci = args.indexOf('--codec');
@@ -88,9 +89,9 @@ export default function JobCard({ job, index, onAbort }: Props) {
             ? { ...meta, label: '已挂起', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' }
             : meta;
     const active = job.status === 'running' || job.status === 'pending';
-    // 支持检查点暂停的引擎：Python 旗舰（RealBasicVSR / SeedVR2）
+    // 支持检查点暂停的引擎：Python 旗舰（RealBasicVSR / SeedVR2 / SwiftVR）
     const pausable = job.status === 'running' && job.engine === 'python' &&
-        (job.args.includes('realbasicvsr') || job.args.includes('seedvr2'));
+        ['realbasicvsr', 'seedvr2', 'swiftvr'].some((m) => job.args.includes(m));
 
     const handleDeleteClick = async () => {
         if (job.status === 'done') {

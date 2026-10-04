@@ -39,7 +39,8 @@ AGPL-3.0 赋予你的权利：
 - **MIT**：Anime4K、Real-ESRGAN ncnn、Real-CUGAN ncnn、RIFE ncnn、Electron、React、spdlog
 - **BSD 3-Clause**：ncnn、PyTorch
 - **Apache 2.0**：MMEditing（RealBasicVSR 实现）、SeedVR2（字节，代码与权重）、
-  ComfyUI-SeedVR2_VideoUpscaler（numz 实现）、Vulkan-Headers
+  ComfyUI-SeedVR2_VideoUpscaler（numz 实现）、SwiftVR（代码与权重，底座 Wan2.2）、
+  diffusers、decord、Vulkan-Headers
 - **Boost Software License 1.0**：Boost
 - **LGPL-2.1**：FFmpeg、libplacebo（见 §6 专项说明）
 
@@ -55,6 +56,7 @@ AGPL-3.0 赋予你的权利：
 | Real-ESRGAN / Real-CUGAN / RIFE / SPAN（ncnn） | MIT | ✅ |
 | RealBasicVSR x4 | Apache 2.0 | ✅ |
 | SeedVR2-3B（字节官方） | Apache 2.0 | ✅ |
+| SwiftVR（随包为 FP8 修改版，NOTICE 已注明修改） | Apache 2.0 | ✅ |
 | **SPyNet 光流权重（spynet.pth）** | **Max Planck 非商业/科研许可** | ❌（商用须联系 ps-license@tue.mpg.de 取得授权） |
 
 **商用合规构建的操作方法**（已经实机验证）：

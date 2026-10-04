@@ -306,7 +306,7 @@ def fmt_hms(seconds):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--model', required=True, choices=['realbasicvsr', 'seedvr2'])
+    ap.add_argument('--model', required=True, choices=['realbasicvsr', 'seedvr2', 'swiftvr'])
     ap.add_argument('-i', '--input', required=True)
     ap.add_argument('-o', '--output', required=True)
     ap.add_argument('--codec', default='libx264')
@@ -323,7 +323,10 @@ def main():
     ap.add_argument('--overlap', type=int, default=8, help='分块重叠长度（帧）')
     ap.add_argument('--segment', type=int, default=121, help='SeedVR2 内部时序段帧数')
     ap.add_argument('--seg-len', type=int, default=240, help='断点续跑宏分片长度（帧）')
-    ap.add_argument('--resolution', type=int, default=0, help='SeedVR2 目标短边像素（0=输入短边×4）')
+    ap.add_argument('--resolution', type=int, default=0,
+                    help='目标短边像素（SeedVR2：0=输入短边×4；SwiftVR：0=短边×2、上限 1440）')
+    ap.add_argument('--clip-len', type=int, default=0,
+                    help='SwiftVR 流式分段帧数（4 的倍数；0=按输出尺寸与显存自动，OOM 时自动减半）')
     ap.add_argument('--batch-size', type=int, default=5, help='SeedVR2 内部批大小（4n+1）')
     ap.add_argument('--blocks-to-swap', type=int, default=-1, help='SeedVR2 BlockSwap 块数（-1=按显存自动）')
     ap.add_argument('--conv3d-workaround', choices=['auto', 'on', 'off'], default='auto',
@@ -333,6 +336,12 @@ def main():
     ap.add_argument('--max-frames', type=int, default=0, help='仅处理前 N 帧（调试用）')
     ap.add_argument('--debug', action='store_true', help='引擎调试日志')
     args = ap.parse_args()
+
+    if args.model == 'swiftvr':
+        sys.path.insert(0, str(ENGINE_DIR))
+        from vsr_models.swiftvr_runner import main as swift_main
+        swift_main(args)
+        return
 
     if args.model == 'seedvr2':
         sys.path.insert(0, str(ENGINE_DIR))

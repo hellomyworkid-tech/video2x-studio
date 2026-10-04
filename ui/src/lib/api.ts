@@ -108,7 +108,7 @@ export const api = {
             body: JSON.stringify({ id }),
         }),
 
-    precheck: (file: string, model: string, opts: { outDir: string; forceCfr: boolean; autoStage: boolean }) =>
+    precheck: (file: string, model: string, opts: { outDir: string; forceCfr: boolean; autoStage: boolean; resolution: number }) =>
         jsonFetch<PrecheckResponse>('/api/jobs/precheck', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

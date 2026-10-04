@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, FolderOpen, History, Info, Loader2, Rocket, R
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { buildArgsForFile, buildOutputPath, buildPythonArgs, defaultJobRequest, engineFor } from '@/lib/args';
-import type { GpuDevice, InstallStatus, JobRequest, PrecheckWarning } from '@/types';
+import type { GpuDevice, InstallStatus, JobRequest, PrecheckWarning, PythonEngineStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,8 @@ interface Props {
     cudaDevices: GpuDevice[];
     cliReady: boolean;
     pyReady: boolean;
+    /** 各 PyTorch 引擎的权重就绪情况（按所选处理器判断，而不是任一就绪即可） */
+    pyEngine: PythonEngineStatus | null;
     /** 程序本体完整性（null = 尚未检测完） */
     install: InstallStatus | null;
     onSubmitted: () => void;
@@ -68,7 +70,7 @@ function loadSavedConfig(): JobRequest | null {
 const PROCESSOR_NAMES: Record<string, string> = {
     lanczos: 'Lanczos 缩放', libplacebo: 'libplacebo', realesrgan: 'Real-ESRGAN',
     realcugan: 'Real-CUGAN', rife: 'RIFE 补帧', span: 'SPAN',
-    realbasicvsr: 'RealBasicVSR', seedvr2: 'SeedVR2',
+    realbasicvsr: 'RealBasicVSR', seedvr2: 'SeedVR2', swiftvr: 'SwiftVR',
 };
 
 /** 把隐藏在标签页里的关键设置浓缩成一句话摘要 */
@@ -83,6 +85,7 @@ function summarizeConfig(req: JobRequest): string {
     else if (p.kind === 'libplacebo') procLabel += ` · ${p.width}×${p.height}`;
     else if (p.kind === 'lanczos') procLabel += p.sizeMode === 'explicit' ? ` · ${p.width}×${p.height}` : ` ×${p.scaleFactor}`;
     else if (p.kind === 'seedvr2') procLabel += p.seedvr2Resolution > 0 ? ` · 短边 ${p.seedvr2Resolution}p` : ' · 短边 ×4';
+    else if (p.kind === 'swiftvr') procLabel += p.swiftvrResolution > 0 ? ` · 短边 ${p.swiftvrResolution}p` : ' · 短边 ×2';
     else procLabel += ' ×4';
     parts.push(procLabel);
 
@@ -101,7 +104,7 @@ function summarizeConfig(req: JobRequest): string {
     return parts.join('　|　');
 }
 
-export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, install, onSubmitted, onCancel }: Props) {
+export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, pyEngine, install, onSubmitted, onCancel }: Props) {
     const [req, setReq] = useState<JobRequest>(() => loadSavedConfig() ?? defaultJobRequest());
     const [submitting, setSubmitting] = useState(false);
     const [prechecking, setPrechecking] = useState(false);
@@ -120,7 +123,11 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
     };
 
     const isPython = engineFor(req.processor.kind) === 'python';
-    const engineOk = isPython ? pyReady : cliReady;
+    const kindWeights: Partial<Record<string, boolean | undefined>> = {
+        realbasicvsr: pyEngine?.realbasicvsrWeights, seedvr2: pyEngine?.seedvr2Weights, swiftvr: pyEngine?.swiftvrWeights,
+    };
+    const pyKindReady = pyReady && kindWeights[req.processor.kind] !== false;
+    const engineOk = isPython ? pyKindReady : cliReady;
 
     // 不可提交的原因（按优先级取第一条）：按钮变灰时必须告诉用户为什么——
     // 程序文件不完整的机器上，此前只有一个灰按钮，用户无从判断问题出在哪
@@ -130,7 +137,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
         }
         if (!engineOk) {
             return isPython
-                ? 'PyTorch 重建档未就绪：缺少 Python 运行时或模型权重（见队列页顶部提示）'
+                ? `${PROCESSOR_NAMES[req.processor.kind] ?? req.processor.kind} 未就绪：缺少 Python 运行时或该引擎的模型权重（见队列页顶部提示）`
                 : 'ncnn 引擎未就绪：找不到 video2x.exe';
         }
         if (req.files.length === 0 && !req.outputDir.trim()) return '请先添加视频文件并选择输出目录';
@@ -179,7 +186,9 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
         setPrechecking(true);
         try {
             const model = req.processor.kind;
-            const precheckOpts = { outDir: req.outputDir, forceCfr: !!req.encoder.forceCfr, autoStage: req.advanced.autoStage };
+            const p = req.processor;
+            const resolution = p.kind === 'seedvr2' ? p.seedvr2Resolution : p.kind === 'swiftvr' ? p.swiftvrResolution : 0;
+            const precheckOpts = { outDir: req.outputDir, forceCfr: !!req.encoder.forceCfr, autoStage: req.advanced.autoStage, resolution };
             // 并发池（6）：大批次同时拉起几百个 ffprobe 会卡死桥进程与系统
             const files = req.files;
             const results: PromiseSettledResult<Awaited<ReturnType<typeof api.precheck>>>[] =
@@ -300,7 +309,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
                                 (isPython ? (
                                     <NotApplicableCard
                                         title="增强阶段不适用于旗舰引擎"
-                                        desc="RealBasicVSR / SeedVR2 内置时序清洁与重建模块，防抖、滤镜降噪、HDR 转制等 FFmpeg 级增强仅对 ncnn 引擎（libplacebo / Real-ESRGAN / Real-CUGAN / RIFE / SPAN）生效。"
+                                        desc="RealBasicVSR / SeedVR2 / SwiftVR 内置时序清洁与重建模块，防抖、滤镜降噪、HDR 转制等 FFmpeg 级增强仅对 ncnn 引擎（libplacebo / Real-ESRGAN / Real-CUGAN / RIFE / SPAN）生效。"
                                     />
                                 ) : (
                                     <EnhanceSection req={req} onChange={patch} bare />

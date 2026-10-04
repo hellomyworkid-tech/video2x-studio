@@ -63,3 +63,19 @@ The source code can be found at https://github.com/ByteDance-Seed/SeedVR.
 The vendored inference implementation is ComfyUI-SeedVR2_VideoUpscaler,
 also available under the Apache License 2.0.
 The source code can be found at https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.
+
+This product depends on SwiftVR (H-oliday), whose code and model weights are
+available under the Apache License 2.0. SwiftVR is built on Wan2.2-TI2V-5B
+(Wan-AI), also available under the Apache License 2.0.
+The source code can be found at https://github.com/H-oliday/SwiftVR and the
+weights at https://huggingface.co/H-oliday/SwiftVR.
+MODIFICATION NOTICE: the bundled file
+engine-python/weights/SwiftVR/swiftvr_transformer_fp8.safetensors is a modified
+form of the official transformer weights: Linear weights are stored as
+float8_e4m3fn with per-output-channel scales (weight-only quantization), and the
+attention Q/K/V projections are pre-fused. The conversion code is
+engine-python/vsr_models/swiftvr_runner.py (convert_official_to_fp8). The
+vendored inference code in engine-python/vendor/swiftvr is unmodified
+(upstream commit recorded in engine-python/vendor/swiftvr/UPSTREAM.txt).
+SwiftVR runs with diffusers 0.36 (Hugging Face, Apache License 2.0) and decord
+(DMLC, Apache License 2.0), installed in engine-python/swiftvr-libs.

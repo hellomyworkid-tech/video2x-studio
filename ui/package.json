@@ -110,6 +110,7 @@
           "!.venv/**",
           "!**/__pycache__/**",
           "!weights/FlashVSR-v1.1/**",
+        "!weights/SwiftVR/transformer/diffusion_pytorch_model.safetensors",
           "!python/Lib/site-packages/torch/include/**",
           "!python/Lib/site-packages/*/tests/**",
           "!python/Lib/site-packages/*/test/**"

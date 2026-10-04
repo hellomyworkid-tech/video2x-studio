@@ -52,7 +52,8 @@ export default function App() {
         [jobs]
     );
 
-    const pyReady = !!(pyEngine && pyEngine.exeExists && (pyEngine.realbasicvsrWeights || pyEngine.seedvr2Weights));
+    const pyReady = !!(pyEngine && pyEngine.exeExists
+        && (pyEngine.realbasicvsrWeights || pyEngine.seedvr2Weights || pyEngine.swiftvrWeights));
 
     return (
         <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -78,6 +79,7 @@ export default function App() {
                             cudaDevices={cudaDevices}
                             cliReady={cliReady === true}
                             pyReady={pyReady}
+                            pyEngine={pyEngine}
                             install={install}
                             onSubmitted={() => setView('queue')}
                             onCancel={() => setView('queue')}

@@ -3,7 +3,7 @@
 
 import type { EngineKind, JobRequest, ProcessorKind } from '@/types';
 
-export const PYTHON_PROCESSORS: ProcessorKind[] = ['realbasicvsr', 'seedvr2'];
+export const PYTHON_PROCESSORS: ProcessorKind[] = ['realbasicvsr', 'seedvr2', 'swiftvr'];
 
 /** 决定一个处理器由哪条引擎链路执行：ncnn CLI 还是 Python sidecar */
 export function engineFor(kind: ProcessorKind): EngineKind {
@@ -27,6 +27,9 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
     if (!enc.copySubs) args.push('--no-copy-subs');
     if (p.kind === 'seedvr2') {
         args.push('--resolution', String(p.seedvr2Resolution > 0 ? p.seedvr2Resolution : 0));
+    }
+    if (p.kind === 'swiftvr') {
+        args.push('--resolution', String(p.swiftvrResolution > 0 ? p.swiftvrResolution : 0));
     }
     return args;
 }
@@ -172,7 +175,7 @@ export function procTag(p: JobRequest['processor']): string {
         case 'rife': return `${p.rifeModel.replace(/-v/, '')}x${p.frameRateMul}`;
         case 'libplacebo': return `placebo-${p.shader}`;
         case 'span': return p.spanModel && p.spanModel !== 'span' ? `span-${p.spanModel}` : 'span';
-        default: return p.kind; // lanczos / realbasicvsr / seedvr2
+        default: return p.kind; // lanczos / realbasicvsr / seedvr2 / swiftvr
     }
 }
 
@@ -216,6 +219,7 @@ export function defaultJobRequest(): JobRequest {
             frameRateMul: 2,
             sceneThresh: 100,
             seedvr2Resolution: 0,
+            swiftvrResolution: 0,
         },
         enhance: {
             stab: false,
@@ -322,7 +326,7 @@ export function capsFor(p: ProcessorCfg): SrCaps | null {
     if (p.kind === 'span') return SPAN_CAPS;
     // lanczos 在倍率模式下才受倍率钳制；指定分辨率模式用显式宽高
     if (p.kind === 'lanczos') return p.sizeMode === 'explicit' ? null : LANCZOS_CAPS;
-    if (p.kind === 'realbasicvsr' || p.kind === 'seedvr2') return FLAGSHIP_CAPS;
+    if (p.kind === 'realbasicvsr' || p.kind === 'seedvr2' || p.kind === 'swiftvr') return FLAGSHIP_CAPS;
     return null; // libplacebo 用显式宽高；rife 无缩放/降噪概念
 }
 

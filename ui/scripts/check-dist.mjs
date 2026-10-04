@@ -27,6 +27,15 @@ const KEY_FILES = [
     'engine-python/weights/spynet.pth',
     'engine-python/weights/SeedVR2-3B/seedvr2_ema_3b_fp8_e4m3fn.safetensors',
     'engine-python/weights/SeedVR2-3B/ema_vae_fp16.safetensors',
+    // SwiftVR：推理源码 + 依赖覆盖层（diffusers 0.36 / decord）+ 预转换 FP8 权重
+    'engine-python/vsr_models/swiftvr_runner.py',
+    'engine-python/vendor/swiftvr/swiftvr/__init__.py',
+    'engine-python/swiftvr-libs/diffusers/__init__.py',
+    'engine-python/swiftvr-libs/decord/__init__.py',
+    'engine-python/weights/SwiftVR/swiftvr_transformer_fp8.safetensors',
+    'engine-python/weights/SwiftVR/reae.safetensors',
+    'engine-python/weights/SwiftVR/prompt_embedding.safetensors',
+    'engine-python/weights/SwiftVR/transformer/config.json',
 ];
 const KEY_DIRS = ['models/realesrgan', 'models/realcugan', 'models/rife', 'models/span', 'models/libplacebo'];
 

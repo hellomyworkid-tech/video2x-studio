@@ -2,7 +2,7 @@
 
 export type ProcessorKind =
     | 'lanczos' | 'libplacebo' | 'realesrgan' | 'realcugan' | 'rife' | 'span'
-    | 'realbasicvsr' | 'seedvr2';
+    | 'realbasicvsr' | 'seedvr2' | 'swiftvr';
 
 export type EngineKind = 'cli' | 'python';
 
@@ -29,6 +29,8 @@ export interface ProcessorConfig {
     sceneThresh: number;
     // SeedVR2（0 = 输入短边×4）
     seedvr2Resolution: number;
+    // SwiftVR 目标短边（0 = 输入短边×2，最高 1440）
+    swiftvrResolution: number;
 }
 
 export interface EnhanceConfig {
@@ -85,6 +87,8 @@ export interface GpuDevice {
     name: string;
     /** Vulkan 设备类型（Discrete GPU / Integrated GPU…）；CUDA 枚举无此字段 */
     type?: string;
+    /** CUDA 枚举附带的显存容量（GB） */
+    vramGb?: number;
 }
 
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'aborted';
@@ -122,6 +126,7 @@ export interface PythonEngineStatus {
     exeExists: boolean;
     realbasicvsrWeights: boolean;
     seedvr2Weights: boolean;
+    swiftvrWeights?: boolean;
 }
 
 // ---------------------------------------------------------------------------

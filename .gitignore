@@ -93,6 +93,8 @@ ui/release/
 # Python 引擎运行时（嵌入式解释器/虚拟环境，体积大、可重建）
 engine-python/.venv/
 engine-python/python/
+# SwiftVR 依赖覆盖层（diffusers 0.36 + decord，pip --target 安装产物）
+engine-python/swiftvr-libs/
 __pycache__/
 *.pyc
 

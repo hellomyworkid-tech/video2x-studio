@@ -69,12 +69,25 @@ const PY_WEIGHTS = {
     realbasicvsr: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'realbasicvsr_x4.pth'),
     seedvr2: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'SeedVR2-3B', 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'),
 };
+// SwiftVR：便携包随附预转换 FP8 单文件（约 5 GB）；也接受官方原版 FP32 权重（约 19 GB，载入时现场量化）
+const SWIFTVR_DIR = path.join(PROJECT_ROOT, 'engine-python', 'weights', 'SwiftVR');
+const SWIFTVR_COMMON = ['reae.safetensors', 'prompt_embedding.safetensors', path.join('transformer', 'config.json')];
+function swiftvrWeightsReady() {
+    const common = SWIFTVR_COMMON.every((f) => fs.existsSync(path.join(SWIFTVR_DIR, f)));
+    const fp8 = fs.existsSync(path.join(SWIFTVR_DIR, 'swiftvr_transformer_fp8.safetensors'));
+    const official = fs.existsSync(path.join(SWIFTVR_DIR, 'transformer', 'diffusion_pytorch_model.safetensors'));
+    // 依赖覆盖层（diffusers 0.36 + decord）与推理源码同样随包分发
+    const libs = fs.existsSync(path.join(PROJECT_ROOT, 'engine-python', 'swiftvr-libs', 'diffusers', '__init__.py'))
+        && fs.existsSync(path.join(PROJECT_ROOT, 'engine-python', 'vendor', 'swiftvr', 'swiftvr', '__init__.py'));
+    return common && (fp8 || official) && libs;
+}
 
 function pythonEngineStatus() {
     return {
         exeExists: fs.existsSync(PYTHON_EXE),
         realbasicvsrWeights: fs.existsSync(PY_WEIGHTS.realbasicvsr),
         seedvr2Weights: fs.existsSync(PY_WEIGHTS.seedvr2),
+        swiftvrWeights: swiftvrWeightsReady(),
     };
 }
 
@@ -160,6 +173,7 @@ const HF = 'https://huggingface.co';
 const HF_MIRROR = 'https://hf-mirror.com';
 const RBVSR_REPO = '/akhaliq/RealBasicVSR_x4/resolve/main/RealBasicVSR_x4.pth';
 const SEEDVR2_REPO = '/numz/SeedVR2_comfyUI/resolve/main/';
+const SWIFTVR_REPO = '/H-oliday/SwiftVR/resolve/main/';
 
 const ASSETS = [
     {
@@ -209,6 +223,31 @@ const ASSETS = [
             },
         ],
     },
+    {
+        // 便携包随附预转换 FP8 文件时视为已安装（installedIf）；缺失时下载官方原版，
+        // 运行时载入即量化，无需额外转换步骤
+        id: 'swiftvr',
+        name: 'SwiftVR 引擎权重（官方原版）',
+        installedIf: [
+            path.join('engine-python', 'weights', 'SwiftVR', 'swiftvr_transformer_fp8.safetensors'),
+            ...SWIFTVR_COMMON.map((f) => path.join('engine-python', 'weights', 'SwiftVR', f)),
+        ],
+        files: [
+            ['transformer/config.json', path.join('transformer', 'config.json'), 495, null],
+            ['prompt_embedding.safetensors', 'prompt_embedding.safetensors', 4202976,
+                'cc4cf7b9aa9def4026bb5952b8aaec846ffc83eee43cafff0d3796b7e9fdf922'],
+            ['reae.safetensors', 'reae.safetensors', 163797568,
+                'c915205d1833677b6887e2fdf675499d3fc781af0c644c99330f7d22fd855514'],
+            ['transformer/diffusion_pytorch_model.safetensors', path.join('transformer', 'diffusion_pytorch_model.safetensors'),
+                19999235584, 'f7ade5b8f7f4ff8b4e26a581772ebe5bcfb6a619ece2dd3483c5395c2d7e1a31'],
+        ].map(([remote, local, size, sha256]) => ({
+            rel: path.join('engine-python', 'weights', 'SwiftVR', local),
+            size,
+            sha256,
+            verify: sha256 ? 'hash' : 'size',
+            urls: [HF_MIRROR + SWIFTVR_REPO + remote, HF + SWIFTVR_REPO + remote],
+        })),
+    },
 ];
 
 function assetFileStatus(f) {
@@ -227,10 +266,12 @@ function assetFileStatus(f) {
 function assetsStatus() {
     return ASSETS.map((a) => {
         const files = a.files.map(assetFileStatus);
+        const alt = Array.isArray(a.installedIf)
+            && a.installedIf.every((rel) => fs.existsSync(path.join(PROJECT_ROOT, rel)));
         return {
             id: a.id,
             name: a.name,
-            installed: files.every((f) => f.ok),
+            installed: alt || files.every((f) => f.ok),
             files,
         };
     });
@@ -388,7 +429,7 @@ async function downloadAsset(asset) {
                     broadcastAssets();
                 });
                 // 校验
-                if (f.verify === 'hash') {
+                if (f.verify === 'hash' || f.verify === 'size') {
                     if (f.size != null && r.bytes !== f.size) {
                         throw new Error(`大小不符（${r.bytes} ≠ ${f.size}）`);
                     }
@@ -632,7 +673,7 @@ function listResiduals(job) {
 function canResume(job) {
     if (job.engine !== 'python') return false;
     if (job.status !== 'failed' && job.status !== 'aborted') return false;
-    if (!job.args.includes('realbasicvsr') && !job.args.includes('seedvr2')) return false;
+    if (!['realbasicvsr', 'seedvr2', 'swiftvr'].some((m) => job.args.includes(m))) return false;
     try {
         return fs.existsSync(ckptPath(job));
     } catch {
@@ -1185,7 +1226,7 @@ const server = http.createServer(async (req, res) => {
             // 旗舰引擎（PyTorch）的设备选择必须用这份 CUDA 枚举，不能复用上方 Vulkan 列表
             if (cudaDevicesCache) return send(res, 200, cudaDevicesCache);
             execFile(PYTHON_EXE, ['-c',
-                'import torch,json;print(json.dumps({"devices":[{"index":i,"name":torch.cuda.get_device_name(i)} for i in range(torch.cuda.device_count())]}))'],
+                'import torch,json;print(json.dumps({"devices":[{"index":i,"name":torch.cuda.get_device_name(i),"vramGb":round(torch.cuda.get_device_properties(i).total_memory/2**30,1)} for i in range(torch.cuda.device_count())]}))'],
                 // torch import 较慢（首次约 10s），成功后永久缓存；失败不缓存（环境可能未就绪）
                 { timeout: 120000 }, (err, stdout) => {
                     if (!err) {
@@ -1354,8 +1395,8 @@ const server = http.createServer(async (req, res) => {
             const job = jobs.get(Number(pauseMatch[1]));
             if (!job) return send(res, 404, { error: '任务不存在' });
             if (job.status !== 'running') return send(res, 409, { error: '任务未在运行' });
-            if (job.engine !== 'python' || (!job.args.includes('realbasicvsr') && !job.args.includes('seedvr2'))) {
-                return send(res, 409, { error: '该引擎不支持检查点暂停（仅 RealBasicVSR / SeedVR2）' });
+            if (job.engine !== 'python' || !['realbasicvsr', 'seedvr2', 'swiftvr'].some((m) => job.args.includes(m))) {
+                return send(res, 409, { error: '该引擎不支持检查点暂停（仅 RealBasicVSR / SeedVR2 / SwiftVR）' });
             }
             // 落一个旗标文件，worker 在下一个宏分片检查点看到后优雅退出（退出码 4）
             job.pauseRequested = true;
@@ -1699,7 +1740,7 @@ const server = http.createServer(async (req, res) => {
             const [vrn, vrd] = String(rFrameRate || '0/1').split('/').map(Number);
             const baseFps = vrd ? vrn / vrd : 0;
             const isVfr = baseFps > 0 && Math.abs(baseFps - probeInfo.fps) / baseFps > 0.01;
-            if (isVfr && forceCfr && !['realbasicvsr', 'seedvr2'].includes(model)) {
+            if (isVfr && forceCfr && !['realbasicvsr', 'seedvr2', 'swiftvr'].includes(model)) {
                 warnings.push({
                     level: 'warn',
                     text: '检测到可变帧率（VFR）源，而「编码器 → 强制恒定帧率」已开启：按帧序号重排时间戳会让音画逐渐不同步。除非播放端不支持可变帧率，建议关闭该选项。',
@@ -1713,7 +1754,7 @@ const server = http.createServer(async (req, res) => {
             const fmtGb = (b) => (b / GB).toFixed(1);
             if (outDir) {
                 const free = freeBytes(outDir);
-                const factor = ['realbasicvsr', 'seedvr2'].includes(model) ? 6 : 3;
+                const factor = ['realbasicvsr', 'seedvr2', 'swiftvr'].includes(model) ? 6 : 3;
                 if (free !== null && free < Math.max(2 * GB, inSize * factor)) {
                     warnings.push({
                         level: 'warn',
@@ -1747,12 +1788,37 @@ const server = http.createServer(async (req, res) => {
                     warnings.push({ level: 'warn', text: `输入尺寸较大：整帧推理约需 ${estFullGb.toFixed(1)} GB 显存，显存不足时会自动退化为空间分块——实测画质约损失 1.6 dB（网络被切开后拿不到全局上下文）。追求画质建议先把源缩到 720p 级别再超分。` });
                 }
             } else if (model === 'seedvr2') {
-                const hours = frames / 0.4 / 3600;
+                // 吞吐与输出像素数近似成反比：RTX 5070 Ti 端到端实测 2560×1440 约 0.25 fps、
+                // 1708×960 约 0.47 fps（默认短边 4×，按输出像素估算）
+                const shortIn = Math.min(probeInfo.width, probeInfo.height) || 1;
+                const res = Number(body.resolution) > 0 ? Number(body.resolution) : shortIn * 4;
+                const outMp = probeInfo.width * probeInfo.height * (res / shortIn) ** 2 / 1e6;
+                const tput = Math.min(1.5, 0.9 / Math.max(outMp, 0.1));
+                const hours = frames / tput / 3600;
                 if (hours > 0.5) {
-                    warnings.push({ level: 'warn', text: `SeedVR2-3B 是画质旗舰引擎，吞吐约 0.4 fps（16GB 显存实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；赶时间建议改用 SPAN / Real-ESRGAN 等 NCNN 引擎。` });
+                    warnings.push({ level: 'warn', text: `SeedVR2-3B 吞吐约 ${tput.toFixed(2)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；同属生成式修复的 SwiftVR 快约 15 倍。` });
                 }
                 if (probeInfo.width * probeInfo.height >= 1920 * 1080) {
                     warnings.push({ level: 'warn', text: '输入 ≥1080p：SeedVR2 默认短边 4x 后输出超 4K，显存与时间开销极大，建议在高级选项中调低目标短边分辨率。' });
+                }
+            }
+            if (model === 'swiftvr') {
+                // 默认输出短边 = min(输入短边×2, 1440)；RTX 5070 Ti 端到端实测 2560×1440 约 3.95 fps，
+                // 吞吐与输出像素数近似成反比
+                const shortIn = Math.min(probeInfo.width, probeInfo.height) || 1;
+                const res = Number(body.resolution) > 0 ? Number(body.resolution) : Math.min(shortIn * 2, 1440);
+                const outMp = probeInfo.width * probeInfo.height * (res / shortIn) ** 2 / 1e6;
+                const tput = Math.min(20, 14.6 / Math.max(outMp, 0.1));
+                const hours = frames / tput / 3600;
+                if (hours > 0.5) {
+                    warnings.push({ level: 'warn', text: `SwiftVR 吞吐约 ${tput.toFixed(1)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成。` });
+                }
+                const vrams = (cudaDevicesCache?.devices || []).map((d) => d.vramGb || 0);
+                if (vrams.length > 0 && Math.max(...vrams) < 15) {
+                    warnings.push({ level: 'error', text: `SwiftVR 需要 16 GB 级显存（检测到最大 ${Math.max(...vrams).toFixed(1)} GB）：模型即使 FP8 量化也需约 5 GB 权重常驻，再加推理所需显存。请改用 nomos8k-compact 等 NCNN 引擎。` });
+                }
+                if (outMp > 4) {
+                    warnings.push({ level: 'warn', text: `输出约 ${outMp.toFixed(1)} 百万像素，超过 2K：16 GB 显存可能放不下（程序会自动减小分段重试，仍不行则报错），建议目标短边不超过 1440。` });
                 }
             }
             return send(res, 200, { ok: true, warnings, probe: probeInfo });

@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install-integrity check: a red banner lists missing runtime files instead of offering weight downloads that cannot help; the start button explains why it is disabled.
 - Packaging guard (`ui/scripts/check-dist.mjs`): `npm run dist` aborts on missing runtime files or C++ binaries older than their sources, and verifies the output package.
 - Disk-space precheck for the output drive and the local staging drive.
+- SwiftVR engine (one-step streaming generative video restoration, Apache 2.0, Wan2.2-TI2V-5B base). Weight-only FP8 with pre-fused QKV and the unused projection copies dropped keeps the weights at ~5 GB (official bf16: 12 GB), so 2560×1440 output fits 16 GB VRAM; measured ~4 fps end-to-end on an RTX 5070 Ti (≈16× SeedVR2), FP8 vs bf16 output PSNR ≈ 50 dB. Runs in an isolated dependency overlay (`engine-python/swiftvr-libs`: diffusers 0.36 + decord) so SeedVR2's diffusers 0.33 is untouched; shares the checkpoint/resume, colour, VFR and stream-copy pipeline; halves the clip length and retries on OOM.
 - PyTorch engines: subtitle stream copy, audio/subtitle copy switches, `--pix-fmt` (e.g. 10-bit), automatic SeedVR2 attention backend (SageAttention/FlashAttention when installed, `V2X_SEEDVR2_ATTN` override).
 
 ### Changed (this branch / 本分支)
