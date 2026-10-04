@@ -1,3 +1,6 @@
+import { FileText } from 'lucide-react';
+import { toast } from 'sonner';
+import { api } from '@/lib/api';
 import type { Job } from '@/types';
 
 interface Props {
@@ -25,6 +28,14 @@ export default function StatusBar({ jobs }: Props) {
             </div>
             <div className="flex items-center gap-3">
                 {pending.length > 0 && <span>排队 {pending.length}</span>}
+                <button
+                    type="button"
+                    title="打开日志目录（按天一个文件，保留最近 7 天；排查问题时把当天的日志发给开发者）"
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-cyan-500/10 hover:text-cyan-300"
+                    onClick={() => api.openLogs().catch((e) => toast.error(e instanceof Error ? e.message : '打开失败'))}
+                >
+                    <FileText className="h-3 w-3" /> 日志
+                </button>
                 <span>Video2X v6.4.0 · 本地引擎</span>
             </div>
         </footer>

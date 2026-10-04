@@ -10,6 +10,7 @@ import { spawn, spawnSync, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import util from 'node:util';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -101,6 +102,49 @@ const FFMPEG = path.join(PROJECT_ROOT, 'third_party', 'ffmpeg-shared', 'bin', 'f
 // 暂存文件名 = 源路径+大小+mtime 的哈希，天然去重，断点续跑自动复用
 // ---------------------------------------------------------------------------
 const CACHE_DIR = path.join(PROJECT_ROOT, 'cache');
+
+// ---------------------------------------------------------------------------
+// 文件日志：cache/logs/bridge-YYYYMMDD.log，保留最近 7 天。
+// GUI 模式下 console 输出无处可去，任务日志又只在内存（最多 400 行），程序一关
+// 排障信息就没了。进度行不入日志，量很小，用同步追加保证崩溃前的内容不丢。
+// ---------------------------------------------------------------------------
+const LOG_DIR = path.join(CACHE_DIR, 'logs');
+const LOG_KEEP_DAYS = 7;
+
+function fileLog(line) {
+    try {
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const day = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+        const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+        fs.mkdirSync(LOG_DIR, { recursive: true });
+        fs.appendFileSync(path.join(LOG_DIR, `bridge-${day}.log`), `${ts} ${line}\n`);
+    } catch { /* 日志失败不影响主流程 */ }
+}
+
+function pruneOldLogs() {
+    try {
+        const cutoff = Date.now() - LOG_KEEP_DAYS * 86400 * 1000;
+        for (const f of fs.readdirSync(LOG_DIR)) {
+            const p = path.join(LOG_DIR, f);
+            if (/^bridge-\d{8}\.log$/.test(f) && fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
+        }
+    } catch { /* 目录不存在等情况忽略 */ }
+}
+
+for (const level of ['log', 'warn', 'error']) {
+    const orig = console[level].bind(console);
+    console[level] = (...args) => {
+        orig(...args);
+        fileLog(`[${level}] ${util.format(...args)}`);
+    };
+}
+
+/** 任务日志：内存（界面展示用）+ 日志文件（带任务号，程序关闭后仍可追溯） */
+function logJob(job, line) {
+    job.log.push(line);
+    fileLog(`#${job.id} ${line}`);
+}
 const RISKY_EXTS = new Set(['.rmvb', '.rm', '.wmv', '.asf', '.flv']);
 const VIDEO_EXTS = new Set([
     '.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m2ts', '.ts',
@@ -449,7 +493,7 @@ function loadJobs() {
             j.error = '程序退出导致任务中断；断点已保留，可续跑或重跑';
             j.finishedAt = Date.now();
             if (Array.isArray(j.log)) {
-                j.log.push('[bridge] 程序重启：运行中的任务已标记为中断，可续跑/重跑');
+                logJob(j, '[bridge] 程序重启：运行中的任务已标记为中断，可续跑/重跑');
             }
         }
         jobs.set(j.id, j);
@@ -748,7 +792,7 @@ async function ensureStaged(job) {
     job.stagedPath = dest;
     try {
         if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-            job.log.push(`[bridge] 预处理：复用已有本地副本 cache/${path.basename(dest)}`);
+            logJob(job, `[bridge] 预处理：复用已有本地副本 cache/${path.basename(dest)}`);
             return;
         }
     } catch { /* fallthrough */ }
@@ -761,21 +805,21 @@ async function ensureStaged(job) {
     job.totalFrames = 0;
     job.remaining = '';
     const why = /^\\\\/.test(job.file) ? '网络共享盘源' : '高风险封装';
-    job.log.push(`[bridge] 预处理（${why}）：${risky ? '无损重封装为 MKV' : '拷贝到本地暂存'} → cache/${path.basename(dest)}`);
+    logJob(job, `[bridge] 预处理（${why}）：${risky ? '无损重封装为 MKV' : '拷贝到本地暂存'} → cache/${path.basename(dest)}`);
     broadcastJobs();
     if (risky) {
         try {
             await remuxToMkv(job, dest, false);
         } catch (e1) {
             if (job.abortRequested) throw e1;
-            job.log.push(`[bridge] 无损 remux 失败（${e1.message.slice(0, 120)}），尝试视频无损+音频转码`);
+            logJob(job, `[bridge] 无损 remux 失败（${e1.message.slice(0, 120)}），尝试视频无损+音频转码`);
             job.progress = 0;
             broadcastJobs();
             try {
                 await remuxToMkv(job, dest, true);
             } catch (e2) {
                 if (job.abortRequested) throw e2;
-                job.log.push(`[bridge] remux 仍失败（${e2.message.slice(0, 120)}），回退为整文件拷贝`);
+                logJob(job, `[bridge] remux 仍失败（${e2.message.slice(0, 120)}），回退为整文件拷贝`);
                 job.progress = 0;
                 broadcastJobs();
                 await copyWithProgress(job, dest);
@@ -787,7 +831,7 @@ async function ensureStaged(job) {
     job.phase = 'processing';
     job.progress = 0;
     job.remaining = '';
-    job.log.push('[bridge] 预处理完成，开始正式处理');
+    logJob(job, '[bridge] 预处理完成，开始正式处理');
     broadcastJobs();
 }
 
@@ -833,7 +877,7 @@ function spawnJob(job) {
     const isPy = job.engine === 'python';
     const spawnCmd = isPy ? PYTHON_EXE : CLI_PATH;
     const spawnArgs = isPy ? [PY_WORKER, ...finalArgs] : finalArgs;
-    job.log.push(`[bridge] spawn(${job.engine}): ${path.basename(spawnCmd)} ${spawnArgs.join(' ')}`);
+    logJob(job, `[bridge] spawn(${job.engine}): ${path.basename(spawnCmd)} ${spawnArgs.join(' ')}`);
     const child = spawn(spawnCmd, spawnArgs, {
         cwd: PROJECT_ROOT, // models/ 与 engine-python/weights 均相对项目根解析
         env,
@@ -860,7 +904,7 @@ function spawnJob(job) {
                 job.fps = Number(m[4]);
                 job.remaining = m[6];
             } else {
-                job.log.push(clean);
+                logJob(job, clean);
                 if (job.log.length > 400) job.log.splice(0, job.log.length - 400);
             }
         }
@@ -880,6 +924,7 @@ function spawnJob(job) {
         job.child = undefined;
         job.status = 'failed';
         job.error = `无法启动 video2x：${err.message}`;
+        logJob(job, `[bridge] ${job.error}`);
         job.finishedAt = Date.now();
         runnerActive = false;
         broadcastJobs();
@@ -908,7 +953,7 @@ function spawnJob(job) {
                 // 「取消存点」抢先清除（竞态），断点也已落盘，必须按可续跑处理
                 job.status = 'aborted';
                 job.error = '已暂停：断点已保存，点击「续跑」随时继续';
-                job.log.push('[bridge] 已在检查点暂停；断点数据已保存');
+                logJob(job, '[bridge] 已在检查点暂停；断点数据已保存');
             } else if (job.abortRequested) {
                 job.status = 'aborted';
             } else {
@@ -916,6 +961,7 @@ function spawnJob(job) {
                 job.error = `video2x 退出码 ${code}（查看日志尾部了解详情）`;
             }
         }
+        logJob(job, `[bridge] 进程退出：退出码 ${code}，任务状态 ${job.status}${job.error ? `（${job.error}）` : ''}`);
         runnerActive = false;
         broadcastJobs();
         setImmediate(runNext);
@@ -1211,7 +1257,7 @@ const server = http.createServer(async (req, res) => {
             // 落一个旗标文件，worker 在下一个宏分片检查点看到后优雅退出（退出码 4）
             job.pauseRequested = true;
             try { fs.writeFileSync(job.outPath + '.v2xpause', String(Date.now())); } catch { /* best effort */ }
-            job.log.push('[bridge] 收到暂停请求：将在当前分片检查点完成后停止（可随时续跑）');
+            logJob(job, '[bridge] 收到暂停请求：将在当前分片检查点完成后停止（可随时续跑）');
             broadcastJobs();
             return send(res, 200, { ok: true });
         }
@@ -1226,7 +1272,7 @@ const server = http.createServer(async (req, res) => {
             }
             job.pauseRequested = false;
             try { fs.unlinkSync(job.outPath + '.v2xpause'); } catch { /* 无旗标则忽略 */ }
-            job.log.push('[bridge] 已取消存点停止请求：任务将继续运行');
+            logJob(job, '[bridge] 已取消存点停止请求：任务将继续运行');
             broadcastJobs();
             return send(res, 200, { ok: true });
         }
@@ -1250,10 +1296,10 @@ const server = http.createServer(async (req, res) => {
                 if (err) {
                     job.suspended = false;
                     try { fs.unlinkSync(job.outPath + '.v2xsuspended'); } catch { /* best effort */ }
-                    job.log.push(`[bridge] 挂起失败：${err.message}`);
+                    logJob(job, `[bridge] 挂起失败：${err.message}`);
                 } else {
                     const tail = stdout ? stdout.trim().split(/\r?\n/).pop() : '';
-                    job.log.push(`[bridge] 已暂停（进程冻结，显存仍占用）${tail ? '：' + tail : ''}`);
+                    logJob(job, `[bridge] 已暂停（进程冻结，显存仍占用）${tail ? '：' + tail : ''}`);
                 }
                 broadcastJobs();
             });
@@ -1273,10 +1319,10 @@ const server = http.createServer(async (req, res) => {
                 '-RootPid', String(pid), '-Mode', 'resume'], { timeout: 60000 }, (err, stdout) => {
                 if (err) {
                     job.suspended = true; // 恢复失败，回到挂起态
-                    job.log.push(`[bridge] 恢复失败：${err.message}`);
+                    logJob(job, `[bridge] 恢复失败：${err.message}`);
                 } else {
                     const tail = stdout ? stdout.trim().split(/\r?\n/).pop() : '';
-                    job.log.push(`[bridge] 已继续运行${tail ? '：' + tail : ''}`);
+                    logJob(job, `[bridge] 已继续运行${tail ? '：' + tail : ''}`);
                     // 延迟删旗标：看门狗每 5s 一轮，必须让它在解冻后先看到旗标并重置计时
                     setTimeout(() => {
                         try { fs.unlinkSync(job.outPath + '.v2xsuspended'); } catch { /* best effort */ }
@@ -1323,7 +1369,7 @@ const server = http.createServer(async (req, res) => {
                 job.fps = 0;
                 job.remaining = '';
             }
-            job.log.push(checkpoint
+            logJob(job, checkpoint
                 ? '[bridge] 断点续跑：从最近的分片检查点继续'
                 : '[bridge] 重新排队：从头开始处理');
             return checkpoint;
@@ -1350,7 +1396,7 @@ const server = http.createServer(async (req, res) => {
                 if (job && job.status === 'pending') {
                     job.status = 'aborted';
                     job.finishedAt = Date.now();
-                    job.log.push('[bridge] 已取消排队（批量操作）');
+                    logJob(job, '[bridge] 已取消排队（批量操作）');
                     count++;
                 }
             }
@@ -1393,6 +1439,16 @@ const server = http.createServer(async (req, res) => {
             child.on('error', () => {}); // explorer 退出码不规范，忽略
             child.unref();
             return send(res, 200, { ok: true });
+        }
+
+        if (route === 'POST /api/logs/open') {
+            fs.mkdirSync(LOG_DIR, { recursive: true });
+            const child = spawn('explorer.exe', [`"${LOG_DIR}"`], {
+                detached: true, stdio: 'ignore', windowsVerbatimArguments: true,
+            });
+            child.on('error', () => {});
+            child.unref();
+            return send(res, 200, { ok: true, dir: LOG_DIR });
         }
 
         const residualMatch = route.match(/^GET \/api\/jobs\/(\d+)\/residual$/);
@@ -1657,7 +1713,9 @@ if (jobOrder.length > 0) {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
+    pruneOldLogs();
     console.log(`[bridge] Video2X Studio bridge listening on http://127.0.0.1:${PORT}`);
+    console.log(`[bridge] 日志目录: ${LOG_DIR}`);
     console.log(`[bridge] PROJECT_ROOT: ${PROJECT_ROOT}${PROJECT_ROOT_FOUND ? '' : '（未找到 video2x.exe，已回退）'}`);
     const inst = installStatus();
     if (!inst.complete) console.warn(`[bridge] 程序文件不完整，缺少：${inst.missing.join(', ')}`);

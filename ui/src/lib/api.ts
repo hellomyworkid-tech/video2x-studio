@@ -76,6 +76,9 @@ export const api = {
     openFolder: (id: number) =>
         jsonFetch<{ ok: boolean }>(`/api/jobs/${id}/open-folder`, { method: 'POST' }),
 
+    /** 在资源管理器中打开日志目录（cache/logs，按天一个文件，保留 7 天） */
+    openLogs: () => jsonFetch<{ ok: boolean; dir: string }>('/api/logs/open', { method: 'POST' }),
+
     residual: (id: number) =>
         jsonFetch<{ status: string; canResume: boolean; residuals: { path: string; size: number; kind: string }[] }>(`/api/jobs/${id}/residual`),
 
