@@ -17,6 +17,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--hdr` CLI option: SDR→HDR tone mapping (`src/filter_hdr.cpp`, libplacebo-based).
 - SPAN super-resolution model support via ncnn/Vulkan (`src/filter_span.cpp`).
 - Graceful SPyNet degradation: RealBasicVSR falls back to checkpoint-embedded SPyNet keys when `spynet.pth` is absent (enables commercial-compliant builds).
+- Multi-GPU scheduling: one serial queue per physical GPU (Vulkan and CUDA indices are mapped to the same card by name), so jobs on different GPUs run in parallel while jobs on the same GPU stay sequential.
+- Lanczos processor (`-p lanczos`, CPU-only FFmpeg scaling) as the default processor.
+- `{proc}` naming-template token (processor + model, e.g. `esrgan-nomos8k-compact`); default template is now `{name}_{proc}.{ext}`.
+- "Auto (discrete first)" Vulkan device selection, now the default.
+- Daily log files under `cache/logs/` (kept 7 days) with a status-bar shortcut; job output, exit codes and bridge messages survive restarts.
+- Install-integrity check: a red banner lists missing runtime files instead of offering weight downloads that cannot help; the start button explains why it is disabled.
+- Packaging guard (`ui/scripts/check-dist.mjs`): `npm run dist` aborts on missing runtime files or C++ binaries older than their sources, and verifies the output package.
+- Disk-space precheck for the output drive and the local staging drive.
+- PyTorch engines: subtitle stream copy, audio/subtitle copy switches, `--pix-fmt` (e.g. 10-bit), automatic SeedVR2 attention backend (SageAttention/FlashAttention when installed, `V2X_SEEDVR2_ATTN` override).
+
+### Changed (this branch / 本分支)
+
+- Timestamps: source timestamps are preserved by default (frames carry their time base through the chain and the encoder is the single owner of output PTS). `--recalculate-pts` opts into the old index-based constant-frame-rate timeline; `--no-recalculate-pts` is kept as a no-op. The UI toggle became "Force constant frame rate" (off by default).
+- Bit rate is entered in Mbps and is mutually exclusive with CRF.
+- Explicit output sizes are rounded up to even dimensions.
+- Dependencies updated within major versions (Electron 43.7.7, React 19.3, Vite 7.3.6); production `npm audit` is clean.
+
+### Fixed (this branch / 本分支)
+
+- Variable-frame-rate sources lost A/V sync on every ncnn/Lanczos chain (a 60 s clip ended 10 s short) because timestamps were rewritten as frame index ÷ nominal rate.
+- RIFE with timestamp recalculation disabled crashed with "non monotonically increasing dts" and left a corrupt file; interpolated frames now sit at their time step between neighbours (exact even on VFR input via a finer encoder time base).
+- CLI exited with a segfault (139) instead of 1/2 on failure or abort because the ncnn GPU instance was only torn down on success.
+- RealBasicVSR/SeedVR2 output colours were shifted (up to 22/255) — RGB→YUV used BT.601 without colour tags; now BT.709 with tags.
+- RealBasicVSR/SeedVR2 jumped every segment and drifted up to 1.66 s on VFR sources; decoding now resamples to the average frame rate.
+- Jobs submitted separately with the same output name overwrote each other (and could wipe a paused PyTorch job's checkpoint).
+- A configured bit rate was silently ignored whenever a CRF was also set.
+- "Open folder" opened Documents for paths containing spaces.
+- Downloaded weights were deleted when the Python runtime was missing (verification failure was mistaken for corruption).
+- Stabilization rejected frames smaller than 128×128 instead of crashing intermittently inside libvidstab.
+- Removed dead code (`temporal_buffer`) and the unused FlashVSR vendor tree.
 
 ### Added
 

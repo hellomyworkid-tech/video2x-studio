@@ -93,7 +93,6 @@ add_library(libvideo2x
     src/logger_manager.cpp
     src/processor_factory.cpp
     src/stab_prepass.cpp
-    src/temporal_buffer.cpp
 )
 
 # Set the C++ standard to C++17
