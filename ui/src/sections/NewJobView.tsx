@@ -95,7 +95,7 @@ function summarizeConfig(req: JobRequest): string {
     const isPy = engineFor(req.processor.kind) === 'python';
     const adv = isPy
         ? [`CUDA 设备${req.advanced.cudaDeviceIndex ?? 0}`]
-        : [`设备${req.advanced.deviceIndex}`];
+        : [req.advanced.deviceIndex < 0 ? '自动选卡' : `设备${req.advanced.deviceIndex}`];
     if (!isPy && req.advanced.hwaccel && req.advanced.hwaccel !== 'none') adv.push(`硬解 ${req.advanced.hwaccel}`);
     parts.push(`高级：${adv.join(' · ')}`);
     return parts.join('　|　');

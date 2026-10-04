@@ -83,6 +83,8 @@ export interface JobRequest {
 export interface GpuDevice {
     index: number;
     name: string;
+    /** Vulkan 设备类型（Discrete GPU / Integrated GPU…）；CUDA 枚举无此字段 */
+    type?: string;
 }
 
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'aborted';
@@ -151,6 +153,9 @@ export interface AssetDownloadState {
 
 export interface AssetsState extends AssetDownloadState {
     assets: AssetStatus[];
+    /** 客户端估算的下载速度（字节/秒）与采样时刻，见 withDownloadSpeed */
+    speed?: number;
+    sampledAt?: number;
     install?: InstallStatus;
 }
 

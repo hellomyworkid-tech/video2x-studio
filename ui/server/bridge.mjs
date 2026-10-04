@@ -423,6 +423,38 @@ async function downloadAsset(asset) {
     }
 }
 
+/** 解析 `video2x -l` 输出：设备行 "N. 名称"，其后的 "Type: Discrete GPU" 等为该设备属性 */
+function parseDeviceList(out) {
+    const devices = [];
+    for (const line of out.split(/\r?\n/)) {
+        const m = line.match(/^(\d+)\.\s+(.+)$/);
+        if (m) {
+            devices.push({ index: Number(m[1]), name: m[2].trim(), type: '' });
+            continue;
+        }
+        const t = line.match(/^\s*Type:\s*(.+)$/);
+        if (t && devices.length > 0) devices[devices.length - 1].type = t[1].trim();
+    }
+    return devices;
+}
+
+// 自动选卡（设备序号 -1）：取第一张独显，没有则 0 号。Vulkan 的枚举顺序因系统而异，
+// 核显排在 0 号的机器上固定用 0 会让超分跑在核显上
+let autoDeviceCache = null;
+function resolveAutoDevice() {
+    if (autoDeviceCache !== null) return autoDeviceCache;
+    try {
+        const env = { ...process.env, PATH: [...DLL_DIRS, process.env.PATH].join(';') };
+        const r = spawnSync(CLI_PATH, ['-l'], { env, cwd: PROJECT_ROOT, timeout: 30000, windowsHide: true });
+        const devices = parseDeviceList(`${r.stdout || ''}\n${r.stderr || ''}`);
+        const discrete = devices.find((d) => /discrete/i.test(d.type));
+        autoDeviceCache = discrete ? discrete.index : 0;
+    } catch {
+        return 0; // 不缓存失败结果，下次再试
+    }
+    return autoDeviceCache;
+}
+
 // DLL search paths required by video2x.exe at runtime
 const DLL_DIRS = [
     path.join(PROJECT_ROOT, 'build-desktop', 'Release'),
@@ -869,7 +901,16 @@ function spawnJob(job) {
     // 输入路径替换为本地暂存副本（若有）：-i 之后的那个参数
     const finalArgs = job.stagedPath
         ? job.args.map((v, i) => (i > 0 && job.args[i - 1] === '-i' ? job.stagedPath : v))
-        : job.args;
+        : [...job.args];
+
+    // ncnn 引擎的"自动（独显优先）"：-d -1 在此解析为实际设备序号
+    if (job.engine !== 'python') {
+        const di = finalArgs.indexOf('-d');
+        if (di >= 0 && finalArgs[di + 1] === '-1') {
+            finalArgs[di + 1] = String(resolveAutoDevice());
+            logJob(job, `[bridge] 自动选择 GPU：Vulkan 设备 ${finalArgs[di + 1]}`);
+        }
+    }
 
     const env = { ...process.env };
     env.PATH = [...DLL_DIRS, env.PATH].join(';');
@@ -1066,12 +1107,7 @@ const server = http.createServer(async (req, res) => {
             env.PATH = [...DLL_DIRS, env.PATH].join(';');
             execFile(CLI_PATH, ['-l'], { env, cwd: PROJECT_ROOT, timeout: 30000 }, (err, stdout, stderr) => {
                 const out = `${stdout}\n${stderr}`;
-                const devices = [];
-                const re = /^(\d+)\.\s+(.+)$/gm;
-                let m;
-                while ((m = re.exec(out)) !== null) {
-                    devices.push({ index: Number(m[1]), name: m[2].trim() });
-                }
+                const devices = parseDeviceList(out);
                 send(res, 200, { devices, raw: out.trim(), error: err ? String(err) : null });
             });
             return;

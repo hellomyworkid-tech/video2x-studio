@@ -222,7 +222,8 @@ export function defaultJobRequest(): JobRequest {
             crf: recommendedCrf('lanczos'),
         },
         advanced: {
-            deviceIndex: 0,
+            // -1 = 自动（独显优先），由 bridge 启动任务时按 `video2x -l` 解析
+            deviceIndex: -1,
             cudaDeviceIndex: 0,
             hwaccel: 'none',
             benchmark: false,

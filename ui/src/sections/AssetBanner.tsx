@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { DownloadCloud, Loader2, PackageOpen, RefreshCcw, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import type { AssetStatus, AssetsState } from '@/types';
@@ -21,30 +21,18 @@ function baseName(p: string): string {
 /** 队列页顶部：组件缺失提醒 + 一键下载（多镜像自动回退）+ 实时进度 */
 export default function AssetBanner({ state }: { state: AssetsState | null }) {
     const [starting, setStarting] = useState<string | null>(null);
-    // 速度估算：比较两次 SSE 推送的 received 差值
-    const lastSample = useRef<{ received: number; ts: number }>({ received: 0, ts: 0 });
-    const [speed, setSpeed] = useState(0);
-
     const downloading = !!state?.active;
     const received = state?.received ?? 0;
+    // 速度在 SSE 回调里估算（withDownloadSpeed），这里只读
+    const speed = state?.speed ?? 0;
 
-    useEffect(() => {
-        const now = Date.now();
-        const prev = lastSample.current;
-        if (prev.ts > 0 && received > prev.received) {
-            const dt = (now - prev.ts) / 1000;
-            if (dt > 0) setSpeed((received - prev.received) / dt);
-        }
-        lastSample.current = { received, ts: now };
-    }, [received]);
-
-    useEffect(() => {
-        if (!downloading) {
-            lastSample.current = { received: 0, ts: 0 };
-            setSpeed(0);
-            setStarting(null);
-        }
-    }, [downloading]);
+    // 下载结束时复位"启动中"：按 prop 变化在渲染期调整状态（React 推荐写法），
+    // 避免在 effect 里同步 setState 引发的额外一轮渲染
+    const [prevDownloading, setPrevDownloading] = useState(downloading);
+    if (downloading !== prevDownloading) {
+        setPrevDownloading(downloading);
+        if (!downloading) setStarting(null);
+    }
 
     if (!state) return null;
     const missing = state.assets.filter((a) => !a.installed);

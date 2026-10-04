@@ -15,6 +15,15 @@ interface Props {
     bare?: boolean;
 }
 
+/** Vulkan 设备类型的中文后缀 */
+function gpuKind(type?: string): string {
+    if (!type) return '';
+    if (/discrete/i.test(type)) return '（独显）';
+    if (/integrated/i.test(type)) return '（核显）';
+    if (/cpu/i.test(type)) return '（CPU 软件渲染）';
+    return '';
+}
+
 export default function AdvancedSection({ req, onChange, devices, python, bare }: Props) {
     const adv = req.advanced;
     const setAdv = (patch: Partial<typeof adv>) => onChange({ advanced: { ...adv, ...patch } });
@@ -59,10 +68,11 @@ export default function AdvancedSection({ req, onChange, devices, python, bare }
                     <Select value={String(adv.deviceIndex)} onValueChange={(v) => setAdv({ deviceIndex: Number(v) })}>
                         <SelectTrigger className="h-9 bg-input/60 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                            {devices.length === 0 && <SelectItem value="0" className="text-xs">设备 0（默认）</SelectItem>}
+                            <SelectItem value="-1" className="text-xs">自动（独显优先）</SelectItem>
+                            {devices.length === 0 && <SelectItem value="0" className="text-xs">设备 0</SelectItem>}
                             {devices.map((d) => (
                                 <SelectItem key={d.index} value={String(d.index)} className="text-xs">
-                                    {d.index} · {d.name}
+                                    {d.index} · {d.name}{gpuKind(d.type)}
                                 </SelectItem>
                             ))}
                         </SelectContent>

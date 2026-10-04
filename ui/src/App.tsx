@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AssetsState, GpuDevice, InstallStatus, Job, PythonEngineStatus } from '@/types';
-import { api, subscribeAssets, subscribeJobs } from '@/lib/api';
+import { api, subscribeAssets, subscribeJobs, withDownloadSpeed } from '@/lib/api';
 import TitleBar from '@/sections/TitleBar';
 import NavRail from '@/sections/NavRail';
 import StatusBar from '@/sections/StatusBar';
@@ -23,7 +23,7 @@ export default function App() {
 
     useEffect(() => {
         const unsub = subscribeJobs(setJobs);
-        const unsubAssets = subscribeAssets(setAssetState);
+        const unsubAssets = subscribeAssets((next) => setAssetState((prev) => withDownloadSpeed(prev, next)));
         api.health()
             .then((h) => {
                 setCliReady(h.cliExists);

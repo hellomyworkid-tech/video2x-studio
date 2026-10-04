@@ -166,6 +166,23 @@ export function subscribeJobs(onJobs: (jobs: Job[]) => void): () => void {
 }
 
 // Subscribe to asset download progress; returns an unsubscribe function.
+/**
+ * 由相邻两次推送的 received 差值估算下载速度。在 SSE 事件回调里计算（而非渲染期或
+ * effect 里），既能调用 Date.now()，也不必在 effect 中同步 setState。
+ */
+export function withDownloadSpeed(prev: AssetsState | null, next: AssetsState): AssetsState {
+    const now = Date.now();
+    if (!next.active) return { ...next, speed: 0, sampledAt: now };
+    const sameFile = prev?.active === next.active && prev?.file === next.file;
+    if (sameFile && prev?.sampledAt && next.received > prev.received) {
+        const dt = (now - prev.sampledAt) / 1000;
+        if (dt > 0) return { ...next, speed: (next.received - prev.received) / dt, sampledAt: now };
+    }
+    // 同一文件但字节数没变：沿用上次的速度与采样点
+    return sameFile ? { ...next, speed: prev?.speed ?? 0, sampledAt: prev?.sampledAt ?? now }
+        : { ...next, speed: 0, sampledAt: now };
+}
+
 export function subscribeAssets(onState: (s: AssetsState) => void): () => void {
     let es: EventSource | null = null;
     let stopped = false;
