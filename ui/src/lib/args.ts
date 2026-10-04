@@ -158,11 +158,27 @@ export function recommendedCrf(kind: ProcessorKind): number {
     return 18;
 }
 
+/**
+ * 命名模板里 {proc} 的展开：处理器 + 模型的简短标签。同一视频换模型对比时，
+ * 输出名直接区分开（如 116_esrgan-nomos8k-compact.mp4 / 116_span.mp4）。
+ */
+export function procTag(p: JobRequest['processor']): string {
+    switch (p.kind) {
+        case 'realesrgan': return `esrgan-${p.realesrganModel.replace(/^realesr(gan)?-/, '')}`;
+        case 'realcugan': return `cugan-${p.realcuganModel.replace(/^models-/, '')}`;
+        case 'rife': return `${p.rifeModel.replace(/-v/, '')}x${p.frameRateMul}`;
+        case 'libplacebo': return `placebo-${p.shader}`;
+        case 'span': return p.spanModel && p.spanModel !== 'span' ? `span-${p.spanModel}` : 'span';
+        default: return p.kind; // lanczos / realbasicvsr / seedvr2
+    }
+}
+
 export function buildOutputPath(req: JobRequest, inputPath: string): string {
     const base = inputPath.replace(/\\/g, '/').split('/').pop() || 'output';
     const stem = base.replace(/\.[^.]+$/, '');
     const name = req.nameTemplate
         .replaceAll('{name}', stem)
+        .replaceAll('{proc}', procTag(req.processor))
         .replaceAll('{ext}', req.container);
     const dir = req.outputDir.replace(/[\\/]+$/, '');
     return `${dir}\\${name}`;
@@ -172,7 +188,8 @@ export function defaultJobRequest(): JobRequest {
     return {
         files: [],
         outputDir: '',
-        nameTemplate: '{name}_v2x.{ext}',
+        // {proc} 带上处理器/模型，换模型对比时输出名天然区分
+        nameTemplate: '{name}_{proc}.{ext}',
         container: 'mp4',
         processor: {
             // 默认 Lanczos：无模型、不占显存、零伪影，对高码率清晰源实测保真度

@@ -211,9 +211,9 @@ export default function FileSection({ req, onChange }: Props) {
                     <Input
                         value={req.nameTemplate}
                         onChange={(e) => onChange({ nameTemplate: e.target.value })}
-                        placeholder="{name}_v2x.{ext}"
+                        placeholder="{name}_{proc}.{ext}"
                         className="h-9 bg-input/60 font-mono text-xs"
-                        title="{name}=原文件名 {ext}=容器扩展名"
+                        title="{name}=原文件名 {proc}=处理器与模型（如 esrgan-nomos8k-compact） {ext}=容器扩展名"
                     />
                 </div>
             </div>

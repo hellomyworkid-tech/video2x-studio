@@ -72,7 +72,7 @@ export interface AdvancedConfig {
 export interface JobRequest {
     files: string[];
     outputDir: string;
-    nameTemplate: string; // {name} {ext}
+    nameTemplate: string; // {name} {proc} {ext}
     container: string;
     processor: ProcessorConfig;
     enhance: EnhanceConfig;
