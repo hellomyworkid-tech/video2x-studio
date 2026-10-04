@@ -1796,19 +1796,19 @@ const server = http.createServer(async (req, res) => {
                 const tput = Math.min(1.5, 0.9 / Math.max(outMp, 0.1));
                 const hours = frames / tput / 3600;
                 if (hours > 0.5) {
-                    warnings.push({ level: 'warn', text: `SeedVR2-3B 吞吐约 ${tput.toFixed(2)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；同属生成式修复的 SwiftVR 快约 15 倍。` });
+                    warnings.push({ level: 'warn', text: `SeedVR2-3B 吞吐约 ${tput.toFixed(2)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；同属生成式修复的 SwiftVR 快近 30 倍。` });
                 }
                 if (probeInfo.width * probeInfo.height >= 1920 * 1080) {
                     warnings.push({ level: 'warn', text: '输入 ≥1080p：SeedVR2 默认短边 4x 后输出超 4K，显存与时间开销极大，建议在高级选项中调低目标短边分辨率。' });
                 }
             }
             if (model === 'swiftvr') {
-                // 默认输出短边 = min(输入短边×2, 1440)；RTX 5070 Ti 端到端实测 2560×1440 约 3.95 fps，
-                // 吞吐与输出像素数近似成反比
+                // 默认输出短边 = min(输入短边×2, 1440)；RTX 5070 Ti 稳态实测 2560×1440 约 7.1 fps
+                // （FP8 张量核计算 + 读写线程化），吞吐与输出像素数近似成反比
                 const shortIn = Math.min(probeInfo.width, probeInfo.height) || 1;
                 const res = Number(body.resolution) > 0 ? Number(body.resolution) : Math.min(shortIn * 2, 1440);
                 const outMp = probeInfo.width * probeInfo.height * (res / shortIn) ** 2 / 1e6;
-                const tput = Math.min(20, 14.6 / Math.max(outMp, 0.1));
+                const tput = Math.min(30, 26 / Math.max(outMp, 0.1));
                 const hours = frames / tput / 3600;
                 if (hours > 0.5) {
                     warnings.push({ level: 'warn', text: `SwiftVR 吞吐约 ${tput.toFixed(1)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成。` });

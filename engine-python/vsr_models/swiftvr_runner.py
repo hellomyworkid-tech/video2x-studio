@@ -20,8 +20,10 @@ RealBasicVSR / SeedVR2 共用 worker.py 的同一套协议与工具函数。
 import glob
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -41,10 +43,13 @@ for p in (str(ENGINE_DIR), str(VENDOR_DIR), str(LIBS_DIR)):
 
 from worker import (probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog,  # noqa: E402
                     pause_requested, resolve_device, validate_cuda_device, quality_args,
-                    decode_cfr_args, encode_color_args, merge_with_source)
+                    decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest)
 
 FP8_MAX = 448.0          # float8_e4m3fn 可表示的最大值
 FP8_MIN_PARAMS = 1 << 20  # 参数量不足此值的 Linear 保持原精度（省不了多少显存，最影响数值）
+# 矩阵乘直接走 FP8 张量核（激活也按张量量化为 FP8）：Ada/Hopper/Blackwell 上默认开启，
+# 由 load_pipeline 探测后设置。V2X_SWIFTVR_FP8_COMPUTE=0 强制关闭（回到 bf16 计算）
+FP8_COMPUTE = False
 
 
 # ---------------------------------------------------------------------------
@@ -74,8 +79,25 @@ def _fp8_linear_cls():
             self.scale.copy_(scale.to(self.scale.dtype))
 
         def forward(self, x):
+            if FP8_COMPUTE and x.dtype == torch.bfloat16:
+                return self._forward_w8a8(x)
             w = self.w8.to(x.dtype) * self.scale.to(x.dtype)
             return F.linear(x, w, self.bias)
+
+        def _forward_w8a8(self, x):
+            """激活按张量动态量化为 FP8，直接走 FP8 张量核（sm_120 上 _scaled_mm 只支持张量级缩放，
+            权重的按通道缩放在输出端补乘）"""
+            shp = x.shape
+            x2 = x.reshape(-1, shp[-1])
+            lo, hi = torch.aminmax(x2)                # 不像 abs().amax() 那样产生激活大小的临时张量
+            sx = (torch.maximum(hi.abs(), lo.abs()).float() / FP8_MAX).clamp_(min=1e-12)
+            x8 = (x2 / sx).to(torch.float8_e4m3fn)
+            if getattr(self, '_one', None) is None or self._one.device != x.device:
+                self._one = torch.ones((), device=x.device)
+            y = torch._scaled_mm(x8, self.w8.t(), scale_a=sx, scale_b=self._one, out_dtype=x.dtype)
+            s = self.scale.t()
+            y = torch.addcmul(self.bias, y, s) if self.bias is not None else y * s
+            return y.reshape(*shp[:-1], -1)
 
     return FP8Linear
 
@@ -210,6 +232,25 @@ def _reinit_nonpersistent_buffers(tr, cfg, dev, dtype):
             b.copy_(ref_bufs[short].to(b.device, b.dtype))
 
 
+def pick_fp8_compute(dev):
+    """FP8 张量核计算是否可用：返回 (开关, 说明)。需 sm_89 及以上（Ada / Hopper / Blackwell），
+    并实际跑一次 _scaled_mm 确认当前 PyTorch 支持。"""
+    import torch
+    if os.environ.get('V2X_SWIFTVR_FP8_COMPUTE', '').strip() == '0':
+        return False, 'bf16（V2X_SWIFTVR_FP8_COMPUTE=0 强制关闭）'
+    cap = torch.cuda.get_device_capability(dev)
+    if cap < (8, 9):
+        return False, f'bf16（显卡 sm_{cap[0]}{cap[1]} 无 FP8 张量核，需 RTX 40 系 / Ada 及以上）'
+    try:
+        a = torch.zeros(32, 64, device=dev).to(torch.float8_e4m3fn)
+        b = torch.zeros(32, 64, device=dev).to(torch.float8_e4m3fn)
+        one = torch.ones((), device=dev)
+        torch._scaled_mm(a, b.t(), scale_a=one, scale_b=one, out_dtype=torch.bfloat16)
+    except Exception as e:  # noqa: BLE001
+        return False, f'bf16（FP8 矩阵乘不可用：{type(e).__name__}）'
+    return True, 'FP8 张量核（权重与激活均为 FP8）'
+
+
 def load_pipeline(dev, log_fn):
     import torch
     from safetensors.torch import load_file
@@ -229,6 +270,17 @@ def load_pipeline(dev, log_fn):
     enable_max_fps_runtime(allow_tf32=True)
     transformer.prepare_for_inference(attention_backend='auto', use_torch_compile=False)
     pipe._prepared = True
+    from swiftvr.models.transformer import (get_attention_backend, list_available_attention_backends,
+                                            set_attention_backend)
+    if get_attention_backend() == 'sageattention':
+        ok, why = sageattn_selftest(dev)
+        if not ok:
+            set_attention_backend('sdpa')
+            log_fn(f'SageAttention 自检失败，改用 SDPA（{why}）')
+    log_fn(f'注意力后端: {get_attention_backend()}（可用: {", ".join(list_available_attention_backends())}）')
+    global FP8_COMPUTE
+    FP8_COMPUTE, why = pick_fp8_compute(dev)
+    log_fn(f'矩阵乘: {why}')
     return pipe
 
 
@@ -288,7 +340,8 @@ def main(args):
     # 显存上限：超出即 OOM（随后自动减小分段重试），而不是被 Windows 驱动挪到
     # 系统内存——那样不报错，但速度会跌到原来的几十分之一
     torch.cuda.set_per_process_memory_fraction(max(0.5, (free_gb - 0.3) / total_gb), dev)
-    clip_len = args.clip_len if args.clip_len > 0 else initial_clip_len(oW * oH, total_gb)
+    # 模型要求 4 的倍数（ReAE 时间维 4 倍压缩）
+    clip_len = max(4, args.clip_len // 4 * 4) if args.clip_len > 0 else initial_clip_len(oW * oH, total_gb)
     log(f'显存 {total_gb:.1f} GB（空闲 {free_gb:.1f} GB），初始分段 {clip_len} 帧')
 
     # ------------------------------------------------------------------
@@ -396,59 +449,135 @@ def main(args):
         need = seg_end - seg_start
         last_frame = None
 
+        # 解码读取、编码写入各占一个后台线程，与 GPU 推理重叠（串行时 GPU 每步空等
+        # 读写约 15%）。看门狗只由主线程计时：等读线程出批、或编码端停滞导致输出
+        # 交不出去时，主线程阻塞在队列上，超时即判定挂死
+        stop = threading.Event()
+        in_q = queue.Queue(maxsize=2)            # 读线程 → 主线程：(帧批 | None, 是否末批)
+        out_q = queue.Queue(maxsize=2)           # 主线程 → 写线程：uint8 帧数组；None 表示结束
+        werr = []
+
+        def put(q, item):
+            """可被 stop 打断的阻塞 put"""
+            while not stop.is_set():
+                try:
+                    q.put(item, timeout=0.5)
+                    return True
+                except queue.Full:
+                    pass
+            return False
+
+        def reader():
+            batch = []
+            try:
+                while not stop.is_set():
+                    raw = dec.stdout.read(frame_bytes)
+                    if not raw or len(raw) < frame_bytes:
+                        break
+                    batch.append(np.frombuffer(raw, np.uint8).reshape(H, W, 3))
+                    if len(batch) == clip:
+                        if not put(in_q, (np.stack(batch), False)):
+                            return
+                        batch = []
+            except (OSError, ValueError):        # 管道已被主线程关闭
+                batch = []
+            finally:
+                put(in_q, (np.stack(batch) if batch else None, True))
+
+        def writer():
+            while True:
+                try:
+                    arr = out_q.get(timeout=0.5)
+                except queue.Empty:
+                    if stop.is_set():
+                        return
+                    continue
+                if arr is None or stop.is_set():
+                    return
+                if werr:
+                    continue                     # 编码器已退出：照常取走，免得主线程卡在 put
+                try:
+                    enc.stdin.write(arr.reshape(-1).data)
+                except (BrokenPipeError, OSError) as e:
+                    werr.append(e)
+
+        rt = threading.Thread(target=reader, daemon=True)
+        wt = threading.Thread(target=writer, daemon=True)
+        rt.start()
+        wt.start()
+
         def consume(y):
-            """把会话输出写入编码器：丢弃上下文帧，截断补帧产生的多余尾帧"""
+            """把会话输出交给写线程：丢弃上下文帧，截断补帧产生的多余尾帧"""
             nonlocal out_index, seg_written, written
             if y is None:
                 return
             arr = ((y[0].clamp(0, 1) * 255.0).round().to(torch.uint8)
                    .permute(0, 2, 3, 1).contiguous().cpu().numpy())
-            for f in arr:
-                if out_index >= drop and seg_written < need:
-                    wd_begin()
-                    try:
-                        enc.stdin.write(f.tobytes())
-                    finally:
-                        wd_end()
-                    seg_written += 1
-                    written += 1
-                out_index += 1
+            lo = max(0, drop - out_index)
+            hi = min(len(arr), drop + need - out_index)
+            out_index += len(arr)
+            if hi > lo:
+                wd_begin()
+                try:
+                    put(out_q, arr[lo:hi])
+                finally:
+                    wd_end()
+                if werr:
+                    raise werr[0]
+                seg_written += hi - lo
+                written += hi - lo
             emit_progress()
 
+        ok = False
+        broken = None
         try:
             with torch.inference_mode():
                 sess = pipe.stream(clip_len=clip, resolution=(oW, oH), dit_overlap=0)
-                buf = []
                 eof = False
                 while not eof:
                     wd_begin()
-                    raw = dec.stdout.read(frame_bytes)
-                    wd_end()
-                    if not raw or len(raw) < frame_bytes:
-                        eof = True
-                    else:
-                        last_frame = np.frombuffer(raw, np.uint8).reshape(H, W, 3)
-                        buf.append(last_frame)
-                    if len(buf) == clip or (eof and buf):
+                    try:
+                        batch, eof = in_q.get()
+                    finally:
+                        wd_end()
+                    if batch is not None:
+                        last_frame = batch[-1].copy()
                         wd_beat()
-                        consume(sess.step(torch.from_numpy(np.stack(buf))))
-                        buf = []
+                        consume(sess.step(torch.from_numpy(batch)))
                 if last_frame is not None:
                     # 补 3 帧重复末帧再 flush：把解码器滞留的尾帧推出来（多出的会被截断）
                     pad = torch.from_numpy(np.stack([last_frame] * 3))
                     consume(sess.step(pad))
                     consume(sess.flush())
+            wd_begin()
+            try:
+                put(out_q, None)
+                wt.join()                        # 等写线程把排队的帧写完
+            finally:
+                wd_end()
+            ok = True
+        except (BrokenPipeError, OSError) as e:
+            if not werr:
+                raise
+            broken = e                           # 编码器先退出了：下面按其退出码报错
         finally:
+            stop.set()
+            wt.join(timeout=10)
             try:
                 enc.stdin.close()
             except (BrokenPipeError, OSError):
                 pass
+            if not ok and dec.poll() is None:
+                dec.kill()                       # 异常路径（如 OOM 重试）不再需要解码输出
+            rt.join(timeout=10)
             dec.stdout.close()
             dec.wait()
             wd_stop()
             rc = enc.wait()
         if rc != 0:
             fail(f'ffmpeg 宏分片编码器退出码 {rc}')
+        if broken is not None:
+            fail(f'写入编码器失败：{broken}')
         if seg_written < need:
             fail(f'本分片只产出 {seg_written} 帧（预期 {need}），输入文件可能损坏；'
                  f'本分片未写入检查点，重跑将从此分片重来')
@@ -472,7 +601,7 @@ def main(args):
                 if clip <= 4:
                     fail(f'显存不足：输出 {oW}x{oH} 在最小分段下仍放不下。请降低目标分辨率，'
                          '或关闭其他占用显存的程序')
-                clip = max(4, clip // 2)
+                clip = max(4, (clip // 2 + 3) // 4 * 4)   # 减半并取 4 的倍数：48→24→12→8→4
                 log(f'显存不足，分段减小到 {clip} 帧后重试本分片')
                 try:
                     os.remove(seg_path(seg_start))

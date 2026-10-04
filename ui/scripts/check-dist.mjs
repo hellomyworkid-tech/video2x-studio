@@ -36,6 +36,14 @@ const KEY_FILES = [
     'engine-python/weights/SwiftVR/reae.safetensors',
     'engine-python/weights/SwiftVR/prompt_embedding.safetensors',
     'engine-python/weights/SwiftVR/transformer/config.json',
+    // SageAttention + Triton 即时编译（TinyCC、ptxas、Python 头文件与导入库缺一不可，
+    // 缺了不会崩——引擎自检后回退 SDPA——但加速会悄悄失效）
+    'engine-python/python/Lib/site-packages/sageattention/__init__.py',
+    'engine-python/python/Lib/site-packages/triton/__init__.py',
+    'engine-python/python/Lib/site-packages/triton/runtime/tcc/tcc.exe',
+    'engine-python/python/Lib/site-packages/triton/backends/nvidia/bin/ptxas.exe',
+    'engine-python/python/include/Python.h',
+    'engine-python/python/libs/python312.lib',
 ];
 const KEY_DIRS = ['models/realesrgan', 'models/realcugan', 'models/rife', 'models/span', 'models/libplacebo'];
 

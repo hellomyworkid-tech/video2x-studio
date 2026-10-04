@@ -79,3 +79,19 @@ vendored inference code in engine-python/vendor/swiftvr is unmodified
 (upstream commit recorded in engine-python/vendor/swiftvr/UPSTREAM.txt).
 SwiftVR runs with diffusers 0.36 (Hugging Face, Apache License 2.0) and decord
 (DMLC, Apache License 2.0), installed in engine-python/swiftvr-libs.
+
+This product bundles SageAttention 2 (THU-ML), available under the Apache
+License 2.0, in engine-python/python/Lib/site-packages/sageattention.
+The source code can be found at https://github.com/thu-ml/SageAttention; the
+bundled Windows build is from https://github.com/woct0rdho/SageAttention.
+
+This product bundles triton-windows (the Windows port of OpenAI Triton),
+available under the MIT License, in engine-python/python/Lib/site-packages/triton.
+The source code can be found at https://github.com/woct0rdho/triton-windows
+(upstream: https://github.com/triton-lang/triton). As shipped in its wheel,
+triton-windows includes:
+- TinyCC (triton/runtime/tcc: tcc.exe, libtcc.dll), available under the GNU
+  Lesser General Public License 2.1, used unmodified as a separate executable
+  and library. The source code can be found at https://repo.or.cz/tinycc.git.
+- ptxas.exe and CUDA headers from the NVIDIA CUDA Toolkit, distributed under the
+  NVIDIA CUDA Toolkit End User License Agreement (https://docs.nvidia.com/cuda/eula/).

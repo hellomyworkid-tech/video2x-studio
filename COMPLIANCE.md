@@ -36,13 +36,16 @@ AGPL-3.0 赋予你的权利：
 
 完整清单见根目录 `NOTICE`（便携包内 `NOTICE.txt`）。按许可宽松度分类：
 
-- **MIT**：Anime4K、Real-ESRGAN ncnn、Real-CUGAN ncnn、RIFE ncnn、Electron、React、spdlog
+- **MIT**：Anime4K、Real-ESRGAN ncnn、Real-CUGAN ncnn、RIFE ncnn、Electron、React、spdlog、
+  triton-windows（Triton 的 Windows 版，SageAttention 的即时编译依赖）
 - **BSD 3-Clause**：ncnn、PyTorch
 - **Apache 2.0**：MMEditing（RealBasicVSR 实现）、SeedVR2（字节，代码与权重）、
   ComfyUI-SeedVR2_VideoUpscaler（numz 实现）、SwiftVR（代码与权重，底座 Wan2.2）、
-  diffusers、decord、Vulkan-Headers
+  diffusers、decord、SageAttention 2（清华 THU-ML）、Vulkan-Headers
 - **Boost Software License 1.0**：Boost
-- **LGPL-2.1**：FFmpeg、libplacebo（见 §6 专项说明）
+- **LGPL-2.1**：FFmpeg、libplacebo、TinyCC（随 triton-windows 附带）（见 §6 专项说明）
+- **NVIDIA CUDA EULA**：ptxas.exe 与 CUDA 头文件（随 triton-windows 附带，与 PyPI 上
+  NVIDIA 官方发布的组件相同，按其 EULA 随应用再分发）
 
 以上均为宽松或弱 copyleft 许可，允许商用与再分发，仅需保留许可文本与声明
 （`NOTICE.txt` 已汇总，随包附带即满足）。
@@ -89,7 +92,9 @@ AGPL-3.0 赋予你的权利：
   对"使用库作品"的要求；
 - FFmpeg 源码可从 https://github.com/FFmpeg/FFmpeg 获取，本项目未修改 FFmpeg 源码；
 - libplacebo 同样以动态链接使用，未修改其源码；
-- 两者的声明已包含在 `NOTICE.txt` 中。
+- TinyCC（`engine-python/python/Lib/site-packages/triton/runtime/tcc`）以独立可执行文件
+  / DLL 形式随 triton-windows 原样附带，未修改，源码见 https://repo.or.cz/tinycc.git；
+- 以上声明均已包含在 `NOTICE.txt` 中。
 
 ## 7. 商标与命名
 

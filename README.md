@@ -22,7 +22,7 @@
 
 **① 旗舰级画质引擎，专治"没救"的片源**
 
-内置 **SwiftVR**——单步流式生成式视频修复，2K 输出实测约 4 fps（RTX 5070 Ti），
+内置 **SwiftVR**——单步流式生成式视频修复，2K 输出稳态实测约 7 fps（RTX 5070 Ti），
 比同类扩散模型快一个数量级、帧间稳定；字节跳动开源的 **SeedVR2-3B** 扩散模型引擎——
 重度压缩、低码率、实拍老片的最强修复力；以及 **RealBasicVSR**——双向循环传播，时序稳定无闪烁。
 经典档覆盖全场景：Real-ESRGAN / Real-CUGAN（实拍与动漫）、SPAN、Anime4K、
@@ -52,7 +52,7 @@ Windows 便携包解压即跑：Python、CUDA 运行时、FFmpeg、模型全部�
 
 | 档位 | 引擎 | 放大 | 适合片源 | 硬件建议 |
 |---|---|---|---|---|
-| 旗舰 | SwiftVR（Apache 2.0，Wan2.2-5B 底座） | 目标分辨率（默认短边 ×2，≤1440） | 退化源的生成式修复，2K 约 4 fps | 16GB 级显存 |
+| 旗舰 | SwiftVR（Apache 2.0，Wan2.2-5B 底座） | 目标分辨率（默认短边 ×2，≤1440） | 退化源的生成式修复，2K 约 7 fps | 16GB 级显存 |
 | 旗舰 | SeedVR2-3B（字节跳动，Apache 2.0） | 目标分辨率 | 重度压缩 / 低码率 / 老片实拍 | 大显存显卡 |
 | 重建 | RealBasicVSR（Apache 2.0） | 4× | 实拍老片，稳定无闪烁 | 主流显卡 |
 | 经典 | Real-ESRGAN / Real-CUGAN / SPAN | 2×/3×/4× | 实拍与动漫全场景 | 入门显卡即可 |
@@ -112,7 +112,7 @@ persistent per-user last configuration, and per-GPU CUDA device selection.
 
 | Tier 档位 | Engine | Scale | Notes |
 |---|---|---|---|
-| Flagship 旗舰 | **SwiftVR** (H-oliday, Apache 2.0; Wan2.2-5B base) | target-resolution | One-step streaming generative restoration; ~4 fps at 2560×1440 on an RTX 5070 Ti with weight-only FP8 (16 GB VRAM) |
+| Flagship 旗舰 | **SwiftVR** (H-oliday, Apache 2.0; Wan2.2-5B base) | target-resolution | One-step streaming generative restoration; ~7 fps at 2560×1440 on an RTX 5070 Ti (FP8 weights, FP8 tensor-core matmuls on RTX 40/50; 16 GB VRAM) |
 | Flagship 旗舰 | **SeedVR2-3B** (ByteDance-Seed, Apache 2.0) | target-resolution | Diffusion VSR; strongest on heavily-compressed/low-quality sources |
 | Mid 中坚 | **RealBasicVSR** (OpenMMLab, Apache 2.0) | 4× | Recurrent VSR, temporally stable, flicker-free |
 

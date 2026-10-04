@@ -31,7 +31,7 @@ WEIGHTS_DIR = ENGINE_DIR / 'weights' / 'SeedVR2-3B'
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, decode_cfr_args, encode_color_args, merge_with_source  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest  # noqa: E402
 
 
 def compute_output_dims(w0, h0, resolution):
@@ -71,15 +71,19 @@ def pick_attention_mode(device='cuda:0'):
         major = torch.cuda.get_device_capability(device)[0] if torch.cuda.is_available() else 0
     except Exception:
         return 'sdpa', '加速库检测失败'
+    sage_note = ''
     if compat.SAGE_ATTN_2_AVAILABLE:
-        return 'sageattn_2', '检测到 SageAttention 2'
+        ok, why = sageattn_selftest(device, varlen=True)
+        if ok:
+            return 'sageattn_2', '检测到 SageAttention 2，自检通过'
+        sage_note = f'；SageAttention 2 自检失败已跳过（{why}）'
     if compat.SAGE_ATTN_3_AVAILABLE and major >= 10:
         return 'sageattn_3', '检测到 SageAttention 3（Blackwell）'
     if compat.FLASH_ATTN_3_AVAILABLE and major == 9:
         return 'flash_attn_3', '检测到 FlashAttention 3（Hopper）'
     if compat.FLASH_ATTN_2_AVAILABLE:
-        return 'flash_attn_2', '检测到 FlashAttention 2'
-    return 'sdpa', '未安装 SageAttention / FlashAttention'
+        return 'flash_attn_2', '检测到 FlashAttention 2' + sage_note
+    return 'sdpa', (sage_note.lstrip('；') if sage_note else '未安装 SageAttention / FlashAttention')
 
 
 def pick_memory_strategy(device='cuda:0'):
@@ -137,6 +141,10 @@ def main(args):
     validate_cuda_device(dev)
     torch.cuda.set_device(dev)
     mem = pick_memory_strategy(dev)
+    if args.tile == 0:                   # --tile 0：VAE 整帧编解码
+        mem.update(enc_tiled=False, dec_tiled=False)
+    elif args.tile > 0:
+        mem.update(enc_tiled=True, dec_tiled=True, tile=args.tile)
     blocks = args.blocks_to_swap if args.blocks_to_swap >= 0 else mem['blocks']
     conv3d_wa = {'on': True, 'off': False}.get(args.conv3d_workaround, mem['conv3d_wa'])
     causal_inflation_lib.NVIDIA_CONV3D_MEMORY_BUG_WORKAROUND = conv3d_wa
@@ -464,7 +472,8 @@ def main(args):
     except OSError:
         pass
     emit_progress()
-    log(f'完成: {args.output}（{written} 帧，输出 {oW}x{oH}）')
+    log(f'完成: {args.output}（{written} 帧，输出 {oW}x{oH}，'
+        f'显存峰值 {torch.cuda.max_memory_reserved(dev) / 2**30:.1f} GB）')
 
 
 if __name__ == '__main__':

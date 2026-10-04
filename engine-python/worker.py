@@ -99,6 +99,32 @@ def validate_cuda_device(device):
              '请在高级选项的 CUDA 设备中选择有效的显卡')
 
 
+def sageattn_selftest(device, varlen=False):
+    """SageAttention 实际跑一次（含 Triton 即时编译）：返回 (可用, 原因)。
+
+    能 import 不等于能用：显卡架构不受支持、Triton 编译失败（如用户目录含非 ASCII
+    字符）都要到调用时才暴露，那时整个任务已经崩了。调用方据此回退 SDPA。
+    varlen=True 测 SeedVR2 用的 sageattn_varlen，否则测 SwiftVR 用的 sageattn。"""
+    try:
+        import torch
+        q = torch.randn(256, 2, 128, device=device, dtype=torch.bfloat16)   # (token, 头, 维)
+        if varlen:
+            from sageattention import sageattn_varlen
+            cu = torch.tensor([0, 128, 256], device=device, dtype=torch.int32)
+            out = sageattn_varlen(q, q, q, cu, cu, 128, 128, is_causal=False)
+        else:
+            from sageattention import sageattn
+            x = q.view(2, 128, 2, 128)                                       # NHD
+            out = sageattn(x, x, x, tensor_layout='NHD', is_causal=False)
+        torch.cuda.synchronize(device)
+        if not bool(torch.isfinite(out).all()):
+            return False, '输出含非有限值'
+        return True, ''
+    except Exception as e:  # noqa: BLE001
+        msg = str(e).strip().splitlines()
+        return False, f'{type(e).__name__}: {msg[0][:160] if msg else ""}'
+
+
 def start_decode_watchdog(dec_proc, warn_after=60, kill_after=300, suspend_flag=None,
                           enc_proc=None):
     """管道心跳看门狗。
