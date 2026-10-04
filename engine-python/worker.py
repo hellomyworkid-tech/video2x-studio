@@ -197,6 +197,7 @@ def probe(path):
     if vstream is None:
         fail('输入文件没有视频流')
     has_audio = any(s['codec_type'] == 'audio' for s in info['streams'])
+    has_subs = any(s['codec_type'] == 'subtitle' for s in info['streams'])
 
     num, den = vstream['avg_frame_rate'].split('/')
     fps = float(num) / float(den) if float(den) > 0 else 25.0
@@ -213,6 +214,7 @@ def probe(path):
         'fps': fps,
         'total': total,
         'has_audio': has_audio,
+        'has_subs': has_subs,
         # 音频编码名：合并/直编时判断能否无损拷进目标容器（cook 等需转 AAC）
         'audio_codec': next(
             (s.get('codec_name', '') for s in info['streams'] if s['codec_type'] == 'audio'), ''),
@@ -257,6 +259,46 @@ def encode_color_args():
             '-color_trc', 'bt709', '-color_range', 'tv']
 
 
+def merge_with_source(list_file, src, out_path, meta, args, log_fn):
+    """分片无损拼接，并按开关从源文件带回音频/字幕流。
+    依次降级重试：音频直拷+字幕 → 音频转 AAC+字幕 → 音频转 AAC、跳过字幕。
+    字幕进 mp4/mov 需转 mov_text（只支持文本字幕，PGS 等图形字幕会失败而跳过）。
+    """
+    want_audio = meta['has_audio'] and not getattr(args, 'no_copy_audio', False)
+    want_subs = meta.get('has_subs') and not getattr(args, 'no_copy_subs', False)
+    mp4_like = Path(out_path).suffix.lower() in ('.mp4', '.m4v', '.mov')
+    sub_codec = 'mov_text' if mp4_like else 'copy'
+
+    def build(audio_codec, subs):
+        cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
+               '-f', 'concat', '-safe', '0', '-i', list_file]
+        if want_audio or subs:
+            cmd += ['-i', src, '-map', '0:v:0']
+            if want_audio:
+                cmd += ['-map', '1:a?', '-c:a', audio_codec, '-shortest']
+            if subs:
+                cmd += ['-map', '1:s?', '-c:s', sub_codec]
+        return cmd + ['-c:v', 'copy', out_path]
+
+    attempts = [('copy', want_subs)]
+    if want_audio:
+        attempts.append(('aac', want_subs))
+    if want_subs:
+        attempts.append(('aac', False))
+    m = None
+    for i, (audio_codec, subs) in enumerate(attempts):
+        if i > 0:
+            if audio_codec == 'aac' and subs:
+                # 源音频编码无法无损塞进目标容器（如 cook→mp4）：视频仍 copy，仅音频重编码
+                log_fn('音频无损拷贝进目标容器失败，回退 AAC 转码后重新合并')
+            elif not subs and want_subs:
+                log_fn('字幕流无法放入目标容器（可能是图形字幕），已跳过字幕后重新合并')
+        m = subprocess.run(build(audio_codec, subs), capture_output=True)
+        if m.returncode == 0:
+            break
+    return m
+
+
 def fmt_hms(seconds):
     seconds = max(0, int(seconds))
     return f'{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}'
@@ -269,6 +311,9 @@ def main():
     ap.add_argument('-o', '--output', required=True)
     ap.add_argument('--codec', default='libx264')
     ap.add_argument('--crf', type=int, default=18)
+    ap.add_argument('--pix-fmt', default='yuv420p', help='输出像素格式（如 yuv420p10le）')
+    ap.add_argument('--no-copy-audio', action='store_true', help='不保留源音频流')
+    ap.add_argument('--no-copy-subs', action='store_true', help='不保留源字幕流')
     ap.add_argument('--bit-rate', type=int, default=0,
                     help='平均码率 bps；>0 时进入码率控制并忽略 --crf')
     ap.add_argument('--chunk', type=int, default=CHUNK_AUTO,
@@ -477,6 +522,7 @@ def main():
         # 码率与质量档同为编码参数，漏掉会让改码率后续跑的新旧分片按不同码控拼接；
         # pipe=2：编码端改为 BT.709 + 解码端恒定帧率，旧管道的分片不能与新分片混拼
         'bitRate': int(getattr(args, 'bit_rate', 0) or 0), 'pipe': 2,
+        'pixFmt': getattr(args, 'pix_fmt', 'yuv420p'),
         'input': str(Path(args.input).resolve()),
         'isize': in_stat.st_size, 'imtime': int(in_stat.st_mtime),
         'w': W, 'h': H, 'fps': round(FPS, 3), 'total': TOTAL,
@@ -552,7 +598,7 @@ def main():
                    '-s', f'{OW}x{OH}', '-r', fps_str, '-i', 'pipe:0',
                    '-an', '-c:v', args.codec,
                    *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
-                   *encode_color_args(), '-pix_fmt', 'yuv420p', seg_file]
+                   *encode_color_args(), '-pix_fmt', getattr(args, 'pix_fmt', 'yuv420p'), seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)
         enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
@@ -672,21 +718,7 @@ def main():
         for p in expected:
             lf.write("file '" + p.replace('\\', '/').replace("'", "'\\''") + "'\n")
 
-    merge_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
-                 '-f', 'concat', '-safe', '0', '-i', list_file]
-    if meta['has_audio']:
-        merge_cmd += ['-i', args.input, '-map', '0:v:0', '-map', '1:a?',
-                      '-c:v', 'copy', '-c:a', 'copy', '-shortest']
-    else:
-        merge_cmd += ['-c:v', 'copy']
-    merge_cmd += [out_path]
-    m = subprocess.run(merge_cmd, capture_output=True)
-    if m.returncode != 0 and meta['has_audio'] and '-c:a' in merge_cmd:
-        # 源音频编码无法无损塞进目标容器（如 cook→mp4）：回退 AAC 转码重试一次，
-        # 视频流仍保持 copy 无损，代价仅音频重编码
-        log('音频无损拷贝进目标容器失败，回退 AAC 转码后重新合并')
-        merge_cmd[merge_cmd.index('-c:a') + 1] = 'aac'
-        m = subprocess.run(merge_cmd, capture_output=True)
+    m = merge_with_source(list_file, args.input, out_path, meta, args, log)
     if m.returncode != 0:
         err = (m.stderr or b'').decode('utf-8', errors='replace')
         fail(f'分片合并失败: {err[:300]}（分片已保留，可重新运行续合并）')

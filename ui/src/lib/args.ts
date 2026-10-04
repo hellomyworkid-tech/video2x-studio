@@ -22,6 +22,9 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
         '--device', `cuda:${req.advanced.cudaDeviceIndex ?? 0}`];
     // 码率 > 0 时 worker 端切到码率控制并忽略 --crf（与 CLI 链路同一规则，见 buildArgsForFile）
     if (enc.bitRate > 0) args.push('--bit-rate', String(enc.bitRate));
+    if (enc.pixFmt) args.push('--pix-fmt', enc.pixFmt);
+    if (!enc.copyAudio) args.push('--no-copy-audio');
+    if (!enc.copySubs) args.push('--no-copy-subs');
     if (p.kind === 'seedvr2') {
         args.push('--resolution', String(p.seedvr2Resolution > 0 ? p.seedvr2Resolution : 0));
     }

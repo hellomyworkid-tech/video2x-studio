@@ -31,7 +31,7 @@ WEIGHTS_DIR = ENGINE_DIR / 'weights' / 'SeedVR2-3B'
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, decode_cfr_args, encode_color_args  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, decode_cfr_args, encode_color_args, merge_with_source  # noqa: E402
 
 
 def compute_output_dims(w0, h0, resolution):
@@ -129,6 +129,7 @@ def main(args):
     fingerprint = {
         'model': 'seedvr2', 'codec': args.codec, 'crf': args.crf,
         'bitRate': int(getattr(args, 'bit_rate', 0) or 0), 'pipe': 2,  # 同 worker.py
+        'pixFmt': getattr(args, 'pix_fmt', 'yuv420p'),
         'resolution': resolution,
         'input': str(Path(args.input).resolve()),
         'isize': in_stat.st_size, 'imtime': int(in_stat.st_mtime),
@@ -259,7 +260,7 @@ def main(args):
                    '-s', f'{oW}x{oH}', '-r', fps_str, '-i', 'pipe:0',
                    '-an', '-c:v', args.codec,
                    *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
-                   *encode_color_args(), '-pix_fmt', 'yuv420p', seg_file]
+                   *encode_color_args(), '-pix_fmt', getattr(args, 'pix_fmt', 'yuv420p'), seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)
         enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
@@ -415,20 +416,8 @@ def main(args):
         for p in expected:
             lf.write("file '" + p.replace('\\', '/').replace("'", "'\\''") + "'\n")
 
-    merge_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
-                 '-f', 'concat', '-safe', '0', '-i', list_file]
-    if meta['has_audio']:
-        merge_cmd += ['-i', args.input, '-map', '0:v:0', '-map', '1:a?',
-                      '-c:v', 'copy', '-c:a', 'copy', '-shortest']
-    else:
-        merge_cmd += ['-c:v', 'copy']
-    merge_cmd += [out_path]
-    m = subprocess.run(merge_cmd, capture_output=True)
-    if m.returncode != 0 and meta['has_audio'] and '-c:a' in merge_cmd:
-        # 源音频编码无法无损塞进目标容器（如 cook→mp4）：回退 AAC 转码重试一次
-        print('[worker] 音频无损拷贝进目标容器失败，回退 AAC 转码后重新合并', flush=True)
-        merge_cmd[merge_cmd.index('-c:a') + 1] = 'aac'
-        m = subprocess.run(merge_cmd, capture_output=True)
+    m = merge_with_source(list_file, args.input, out_path, meta, args,
+                          lambda msg: print(f'[worker] {msg}', flush=True))
     if m.returncode != 0:
         err = (m.stderr or b'').decode('utf-8', errors='replace')
         fail(f'宏分片合并失败: {err[:300]}（分片已保留，可重新运行续合并）')
@@ -456,6 +445,9 @@ if __name__ == '__main__':
     ap.add_argument('--codec', default='libx264')
     ap.add_argument('--crf', type=int, default=18)
     ap.add_argument('--bit-rate', type=int, default=0, help='平均码率 bps；>0 时进入码率控制并忽略 --crf')
+    ap.add_argument('--pix-fmt', default='yuv420p')
+    ap.add_argument('--no-copy-audio', action='store_true')
+    ap.add_argument('--no-copy-subs', action='store_true')
     ap.add_argument('--resolution', type=int, default=0, help='目标短边像素（0=输入短边×4）')
     ap.add_argument('--segment', type=int, default=121, help='模型内部时序段帧数')
     ap.add_argument('--seg-len', type=int, default=240, help='断点续跑宏分片长度（帧）')
