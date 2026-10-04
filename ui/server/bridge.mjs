@@ -690,6 +690,16 @@ function inputStat(file) {
     }
 }
 
+/** 所在磁盘的剩余字节数；不支持或失败时返回 null（不阻断流程） */
+function freeBytes(p) {
+    try {
+        const st = fs.statfsSync(p);
+        return Number(st.bavail) * Number(st.bsize);
+    } catch {
+        return null;
+    }
+}
+
 function needsStaging(job) {
     if (job.autoStage === false) return false;
     if (/^\\\\/.test(job.file)) return true; // UNC 网络路径
@@ -1583,6 +1593,9 @@ const server = http.createServer(async (req, res) => {
             const body = await readBody(req);
             const file = String(body.file || '');
             const model = String(body.model || '');
+            const outDir = String(body.outDir || '');
+            const forceCfr = body.forceCfr === true;
+            const autoStage = body.autoStage !== false;
             const warnings = [];
             const probeInfo = { width: 0, height: 0, fps: 0, frames: 0, duration: 0, hasAudio: false };
             let rFrameRate = ''; // r_frame_rate 与 avg_frame_rate 不一致 → VFR 源
@@ -1623,15 +1636,42 @@ const server = http.createServer(async (req, res) => {
             if (['.rmvb', '.rm', '.wmv', '.asf', '.flv'].includes(ext)) {
                 warnings.push({ level: 'warn', text: `${ext} 封装常带索引异常，按帧流式解码可能中途挂死；建议先转封装为 MP4/MKV（无损 remux 即可）。` });
             }
-            // VFR 源检测：r_frame_rate（基准）与 avg_frame_rate（平均）不一致即为可变帧率，
-            // 引擎按帧重建时间轴后音画可能逐渐不同步
+            // VFR 源检测：r_frame_rate（基准）与 avg_frame_rate（平均）不一致即为可变帧率。
+            // 默认保留源时间戳，音画同步不受影响；只有开启「强制恒定帧率」（按帧序号重排
+            // 时间戳）时才会逐渐不同步——实测 60s 的可变帧率视频画面短 10s
             const [vrn, vrd] = String(rFrameRate || '0/1').split('/').map(Number);
             const baseFps = vrd ? vrn / vrd : 0;
-            if (baseFps > 0 && Math.abs(baseFps - probeInfo.fps) / baseFps > 0.01) {
+            const isVfr = baseFps > 0 && Math.abs(baseFps - probeInfo.fps) / baseFps > 0.01;
+            if (isVfr && forceCfr && !['realbasicvsr', 'seedvr2'].includes(model)) {
                 warnings.push({
                     level: 'warn',
-                    text: `可变帧率（VFR）源（基准 ${baseFps.toFixed(2)}fps / 平均 ${probeInfo.fps.toFixed(2)}fps）：处理后音画可能逐渐不同步，建议先转码为恒定帧率（CFR）再处理。`,
+                    text: '检测到可变帧率（VFR）源，而「编码器 → 强制恒定帧率」已开启：按帧序号重排时间戳会让音画逐渐不同步。除非播放端不支持可变帧率，建议关闭该选项。',
                 });
+            }
+
+            // 磁盘空间：超分输出常是源文件的数倍；PyTorch 引擎先写分片再合并，峰值再翻倍。
+            // 文案不含单文件数值，批量预检时同类提示可合并去重
+            const inSize = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
+            const GB = 1024 ** 3;
+            const fmtGb = (b) => (b / GB).toFixed(1);
+            if (outDir) {
+                const free = freeBytes(outDir);
+                const factor = ['realbasicvsr', 'seedvr2'].includes(model) ? 6 : 3;
+                if (free !== null && free < Math.max(2 * GB, inSize * factor)) {
+                    warnings.push({
+                        level: 'warn',
+                        text: `输出目录所在磁盘仅剩 ${fmtGb(free)} GB：超分输出通常是源文件的数倍大，空间不足会在处理中途失败。建议换到空间更大的磁盘。`,
+                    });
+                }
+            }
+            if (autoStage && (/^\\\\/.test(file) || RISKY_EXTS.has(path.extname(file).toLowerCase()))) {
+                const free = freeBytes(CACHE_DIR) ?? freeBytes(PROJECT_ROOT);
+                if (free !== null && free < inSize * 1.1 + GB) {
+                    warnings.push({
+                        level: 'warn',
+                        text: `本地暂存所在磁盘（程序目录）仅剩 ${fmtGb(free)} GB，可能放不下需要暂存的源文件；可在「输入与输出」中关闭自动本地暂存，或腾出空间。`,
+                    });
+                }
             }
             const frames = probeInfo.frames;
             if (model === 'realbasicvsr') {

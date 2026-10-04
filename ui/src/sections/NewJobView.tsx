@@ -179,6 +179,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
         setPrechecking(true);
         try {
             const model = req.processor.kind;
+            const precheckOpts = { outDir: req.outputDir, forceCfr: !!req.encoder.forceCfr, autoStage: req.advanced.autoStage };
             // 并发池（6）：大批次同时拉起几百个 ffprobe 会卡死桥进程与系统
             const files = req.files;
             const results: PromiseSettledResult<Awaited<ReturnType<typeof api.precheck>>>[] =
@@ -189,7 +190,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
                     while (cursor < files.length) {
                         const i = cursor++;
                         try {
-                            results[i] = { status: 'fulfilled', value: await api.precheck(files[i], model) };
+                            results[i] = { status: 'fulfilled', value: await api.precheck(files[i], model, precheckOpts) };
                         } catch (reason) {
                             results[i] = { status: 'rejected', reason };
                         }
