@@ -163,7 +163,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, in
                 localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...req, files: [], outputDir: '' }));
             } catch { /* 存储失败不影响主流程 */ }
             toast.success(`已加入队列：${res.jobs.length} 个任务`, {
-                description: '任务将按顺序串行处理',
+                description: '同一张显卡上的任务按顺序处理',
             });
             onSubmitted();
         } catch (e) {

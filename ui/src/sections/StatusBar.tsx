@@ -17,7 +17,7 @@ export default function StatusBar({ jobs }: Props) {
             <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1.5">
                     <span className={`h-1.5 w-1.5 rounded-full ${cur ? 'bg-cyan-400 pulse-dot' : 'bg-emerald-400'}`} />
-                    {cur ? '处理中' : '空闲'}
+                    {cur ? (running.length > 1 ? `处理中 ×${running.length}` : '处理中') : '空闲'}
                 </span>
                 {cur && (
                     <span className="max-w-72 truncate" title={cur.file}>

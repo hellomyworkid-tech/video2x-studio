@@ -440,19 +440,25 @@ function parseDeviceList(out) {
 
 // 自动选卡（设备序号 -1）：取第一张独显，没有则 0 号。Vulkan 的枚举顺序因系统而异，
 // 核显排在 0 号的机器上固定用 0 会让超分跑在核显上
-let autoDeviceCache = null;
-function resolveAutoDevice() {
-    if (autoDeviceCache !== null) return autoDeviceCache;
+let vulkanDevicesCache = null;
+/** Vulkan 设备列表（`video2x -l`，约 1 秒，成功后缓存；失败返回空数组且不缓存） */
+function getVulkanDevices() {
+    if (vulkanDevicesCache) return vulkanDevicesCache;
     try {
         const env = { ...process.env, PATH: [...DLL_DIRS, process.env.PATH].join(';') };
         const r = spawnSync(CLI_PATH, ['-l'], { env, cwd: PROJECT_ROOT, timeout: 30000, windowsHide: true });
         const devices = parseDeviceList(`${r.stdout || ''}\n${r.stderr || ''}`);
-        const discrete = devices.find((d) => /discrete/i.test(d.type));
-        autoDeviceCache = discrete ? discrete.index : 0;
+        if (devices.length > 0) vulkanDevicesCache = devices;
+        return devices;
     } catch {
-        return 0; // 不缓存失败结果，下次再试
+        return [];
     }
-    return autoDeviceCache;
+}
+
+function resolveAutoDevice() {
+    const devices = getVulkanDevices();
+    const discrete = devices.find((d) => /discrete/i.test(d.type));
+    return discrete ? discrete.index : 0;
 }
 
 // DLL search paths required by video2x.exe at runtime
@@ -474,7 +480,12 @@ let nextJobId = 1;
 let nextBatchId = 1;
 const jobs = new Map(); // id -> job
 const jobOrder = []; // creation order
-let runnerActive = false;
+// 调度槽位：物理显卡 → 正在其上运行的任务。同一张卡串行（显存/算力不争抢），
+// 不同卡并行。ncnn（Vulkan 序号）与 PyTorch（CUDA 序号）编号空间不同，统一换算成
+// "显卡名#同名序号"，保证两种引擎不会同时压在同一张卡上。查不到设备信息的任务按
+// EXCLUSIVE 独占执行——宁可串行也不冒险并发。单卡机器行为与旧版完全一致。
+const EXCLUSIVE = '*';
+const busySlots = new Map(); // slotKey -> jobId
 
 // ---------------------------------------------------------------------------
 // 任务持久化：记录落盘 cache/jobs.json，程序重启/崩溃后队列不丢
@@ -674,7 +685,7 @@ function broadcastJobs() {
 }
 
 // ---------------------------------------------------------------------------
-// Runner — serial queue (GPU workloads should not run concurrently)
+// Runner — 每张物理显卡一个串行队列（同卡不并发，多卡并行）
 // ---------------------------------------------------------------------------
 const PROGRESS_RE = /frame=(\d+)\/(\d+) \(([\d.]+)%\); fps=([\d.]+); elapsed=(\S+); remaining=(\S+)/;
 
@@ -877,12 +888,56 @@ async function ensureStaged(job) {
     broadcastJobs();
 }
 
-function runNext() {
-    if (runnerActive) return;
-    const job = jobOrder.map((id) => jobs.get(id)).find((j) => j.status === 'pending');
-    if (!job) return;
+/** 物理显卡标识：同名卡按其在各自枚举中的同名序号区分（多张同型号卡） */
+function physicalGpuKey(dev, list) {
+    const same = list.filter((d) => d.name === dev.name);
+    return `${dev.name}#${same.findIndex((d) => d.index === dev.index)}`;
+}
 
-    runnerActive = true;
+function slotKeyOf(job) {
+    if (job.engine === 'python') {
+        const m = String(job.args[job.args.indexOf('--device') + 1] || '').match(/^cuda:(\d+)$/);
+        const list = cudaDevicesCache?.devices || [];
+        const dev = m ? list.find((d) => d.index === Number(m[1])) : null;
+        return dev ? physicalGpuKey(dev, list) : EXCLUSIVE;
+    }
+    const list = getVulkanDevices();
+    const di = job.args.indexOf('-d');
+    let idx = di >= 0 ? Number(job.args[di + 1]) : 0;
+    if (idx < 0) idx = resolveAutoDevice();
+    const dev = list.find((d) => d.index === idx);
+    return dev ? physicalGpuKey(dev, list) : EXCLUSIVE;
+}
+
+function canStart(key) {
+    if (busySlots.size === 0) return true;
+    if (key === EXCLUSIVE || busySlots.has(EXCLUSIVE)) return false;
+    return !busySlots.has(key);
+}
+
+function releaseSlot(job) {
+    if (job.slotKey && busySlots.get(job.slotKey) === job.id) busySlots.delete(job.slotKey);
+    job.slotKey = null;
+}
+
+function runNext() {
+    // 按添加顺序扫描：能上卡的立即启动（不同卡并行），所在卡忙则跳过、留给后面别的卡；
+    // 遇到需要独占且暂不能启动的任务就停止扫描，避免它被后来的任务长期饿死
+    for (const id of [...jobOrder]) {
+        const job = jobs.get(id);
+        if (!job || job.status !== 'pending') continue;
+        const key = slotKeyOf(job);
+        if (!canStart(key)) {
+            if (key === EXCLUSIVE) break;
+            continue;
+        }
+        startJob(job, key);
+    }
+}
+
+function startJob(job, key) {
+    busySlots.set(key, job.id);
+    job.slotKey = key;
     job.status = 'running';
     job.startedAt = Date.now();
     job.phase = 'processing';
@@ -901,7 +956,7 @@ function runNext() {
                 job.status = 'failed';
                 job.error = `预处理失败：${e.message}`;
             }
-            runnerActive = false;
+            releaseSlot(job);
             broadcastJobs();
             setImmediate(runNext);
         });
@@ -928,6 +983,7 @@ function spawnJob(job) {
     const isPy = job.engine === 'python';
     const spawnCmd = isPy ? PYTHON_EXE : CLI_PATH;
     const spawnArgs = isPy ? [PY_WORKER, ...finalArgs] : finalArgs;
+    logJob(job, `[bridge] 调度槽位：${job.slotKey === EXCLUSIVE ? '独占（未识别显卡）' : job.slotKey}`);
     logJob(job, `[bridge] spawn(${job.engine}): ${path.basename(spawnCmd)} ${spawnArgs.join(' ')}`);
     const child = spawn(spawnCmd, spawnArgs, {
         cwd: PROJECT_ROOT, // models/ 与 engine-python/weights 均相对项目根解析
@@ -977,7 +1033,7 @@ function spawnJob(job) {
         job.error = `无法启动 video2x：${err.message}`;
         logJob(job, `[bridge] ${job.error}`);
         job.finishedAt = Date.now();
-        runnerActive = false;
+        releaseSlot(job);
         broadcastJobs();
         setImmediate(runNext);
     });
@@ -1013,7 +1069,7 @@ function spawnJob(job) {
             }
         }
         logJob(job, `[bridge] 进程退出：退出码 ${code}，任务状态 ${job.status}${job.error ? `（${job.error}）` : ''}`);
-        runnerActive = false;
+        releaseSlot(job);
         broadcastJobs();
         setImmediate(runNext);
     });
@@ -1118,6 +1174,7 @@ const server = http.createServer(async (req, res) => {
             execFile(CLI_PATH, ['-l'], { env, cwd: PROJECT_ROOT, timeout: 30000 }, (err, stdout, stderr) => {
                 const out = `${stdout}\n${stderr}`;
                 const devices = parseDeviceList(out);
+                if (devices.length > 0) vulkanDevicesCache = devices;
                 send(res, 200, { devices, raw: out.trim(), error: err ? String(err) : null });
             });
             return;

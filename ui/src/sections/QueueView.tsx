@@ -80,7 +80,7 @@ export default function QueueView({ jobs, assetState, install, onNewJob, onAbort
                     <div>
                         <h1 className="text-xl font-bold tracking-tight">任务队列</h1>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                            批量视频增强 · 任务按添加顺序串行处理，保障 GPU 稳定性
+                            批量视频增强 · 同一张显卡上的任务按顺序处理；多显卡时分配到不同卡的任务并行
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
