@@ -23,10 +23,11 @@ export default defineConfig([
   {
     // shadcn/ui 生成的组件：同文件导出变体与工具函数、骨架屏用随机宽度是该库的惯例写法，
     // 原样保留以便后续直接用 shadcn CLI 覆盖升级
-    files: ['src/components/ui/**/*.{ts,tsx}'],
+    files: ['src/components/ui/**/*.{ts,tsx}', 'src/hooks/use-mobile.ts'],
     rules: {
       'react-refresh/only-export-components': 'off',
       'react-hooks/purity': 'off',
+      'react-hooks/set-state-in-effect': 'off',
     },
   },
 ])
