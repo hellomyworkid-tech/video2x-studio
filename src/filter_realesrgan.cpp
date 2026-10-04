@@ -6,6 +6,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "avutils.h"
 #include "conversions.h"
 #include "fsutils.h"
 #include "logger_manager.h"
@@ -152,7 +153,7 @@ int FilterRealesrgan::filter(AVFrame* in_frame, AVFrame** out_frame) {
     }
 
     // Rescale PTS to encoder's time base
-    (*out_frame)->pts = av_rescale_q(in_frame->pts, in_time_base_, out_time_base_);
+    avutils::copy_frame_pts(in_frame, *out_frame, in_time_base_, out_time_base_);
 
     // Return the processed frame to the caller
     return ret;

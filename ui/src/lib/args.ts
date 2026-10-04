@@ -91,7 +91,7 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
     if (enc.pixFmt) args.push('--pix-fmt', enc.pixFmt);
     if (!enc.copyAudio) args.push('--no-copy-audio-streams');
     if (!enc.copySubs) args.push('--no-copy-subtitle-streams');
-    if (!enc.recalculatePts) args.push('--no-recalculate-pts');
+    if (enc.forceCfr) args.push('--recalculate-pts');
     // 码率控制与恒定质量互斥：x264/x265 等在同时收到 crf 与 bit_rate 时以 crf 为准、
     // 静默丢弃码率（实测 crf=20 + 8 Mbps 产物 4.58 Mbps，与不设码率完全一致）。
     // 因此设了码率就只发 --bit-rate，不再发任何质量档参数。
@@ -208,7 +208,7 @@ export function defaultJobRequest(): JobRequest {
             extraOpts: [],
             copyAudio: true,
             copySubs: true,
-            recalculatePts: true,
+            forceCfr: false,
             // 与默认处理器（lanczos）的推荐值保持一致；切换处理器时会自动跟随，
             // 但用户手动改过之后就不再覆盖（见 ProcessorSection 的 pickProcessor）
             crf: recommendedCrf('lanczos'),

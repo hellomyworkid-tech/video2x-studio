@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "avutils.h"
 #include "fsutils.h"
 #include "libplacebo.h"
 #include "logger_manager.h"
@@ -108,7 +109,9 @@ int FilterLibplacebo::filter(AVFrame* in_frame, AVFrame** out_frame) {
     }
 
     // Rescale PTS to encoder's time base
-    (*out_frame)->pts = av_rescale_q((*out_frame)->pts, in_time_base_, out_time_base_);
+    avutils::rescale_frame_pts(
+        *out_frame, av_buffersink_get_time_base(buffersink_ctx_), out_time_base_
+    );
 
     // Return the processed frame to the caller
     return 0;
@@ -139,7 +142,9 @@ int FilterLibplacebo::flush(std::vector<AVFrame*>& flushed_frames) {
         }
 
         // Rescale PTS to encoder's time base
-        filt_frame->pts = av_rescale_q(filt_frame->pts, in_time_base_, out_time_base_);
+        avutils::rescale_frame_pts(
+            filt_frame, av_buffersink_get_time_base(buffersink_ctx_), out_time_base_
+        );
 
         // Add to processed frames
         flushed_frames.push_back(filt_frame);

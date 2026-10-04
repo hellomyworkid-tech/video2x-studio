@@ -89,7 +89,7 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
             <div className="mt-4 grid grid-cols-3 gap-3">
                 <ToggleRow label="复制音频流" desc="保留原视频音轨" checked={enc.copyAudio} onChange={(v) => setEnc({ copyAudio: v })} />
                 <ToggleRow label="复制字幕流" desc="保留原视频字幕" checked={enc.copySubs} onChange={(v) => setEnc({ copySubs: v })} />
-                <ToggleRow label="重算时间戳" desc="修正输出 PTS（建议开）" checked={enc.recalculatePts} onChange={(v) => setEnc({ recalculatePts: v })} />
+                <ToggleRow label="强制恒定帧率" desc="按帧序号重排时间戳（默认关；手机/录屏等可变帧率素材开启会音画不同步）" checked={!!enc.forceCfr} onChange={(v) => setEnc({ forceCfr: v })} />
             </div>
 
             {/* extra AVOptions */}

@@ -17,7 +17,9 @@ namespace encoder {
 struct EncoderConfig {
     // Non-AVCodecContext options
     std::string codec = "libx264";
-    bool recalculate_pts = true;
+    // Rewrite timestamps from the frame index (forces CFR). Off by default: source
+    // timestamps are preserved, which keeps variable-frame-rate input in A/V sync.
+    bool recalculate_pts = false;
     bool copy_audio_streams = true;
     bool copy_subtitle_streams = true;
 
@@ -84,6 +86,8 @@ class Encoder {
     AVCodecContext* enc_ctx_;
     int out_vstream_idx_;
     int* stream_map_;
+    int64_t last_pts_ = AV_NOPTS_VALUE;
+    bool pts_fixup_warned_ = false;
 };
 
 }  // namespace encoder

@@ -97,7 +97,9 @@ int parse_args(
         encoder_opts.add_options()
             ("codec,c", PO_STR_VALUE<video2x::fsutils::StringType>()
                 ->default_value(STR("libx264"), "libx264"), "Output codec")
-            ("no-recalculate-pts", "Do not recalculate presentation timestamps")
+            ("recalculate-pts", "Rewrite timestamps from the frame index (forces a constant "
+                "frame rate; desyncs audio on variable-frame-rate input)")
+            ("no-recalculate-pts", "Keep source timestamps (default; kept for compatibility)")
             ("no-copy-audio-streams", "Do not copy audio streams")
             ("no-copy-subtitle-streams", "Do not copy subtitle streams")
             ("pix-fmt", PO_STR_VALUE<video2x::fsutils::StringType>(), "Output pixel format")
@@ -371,7 +373,8 @@ int parse_args(
         }
 
         // Parse copy streams options
-        enc_cfg.recalculate_pts = vm.count("no-recalculate-pts") == 0;
+        enc_cfg.recalculate_pts =
+            vm.count("recalculate-pts") > 0 && vm.count("no-recalculate-pts") == 0;
         enc_cfg.copy_audio_streams = vm.count("no-copy-audio-streams") == 0;
         enc_cfg.copy_subtitle_streams = vm.count("no-copy-subtitle-streams") == 0;
 

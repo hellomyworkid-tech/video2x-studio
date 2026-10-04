@@ -52,7 +52,9 @@ export interface EncoderConfig {
     extraOpts: { key: string; value: string }[];
     copyAudio: boolean;
     copySubs: boolean;
-    recalculatePts: boolean;
+    /** 按帧序号重排时间戳（强制恒定帧率）。默认关：保留源时间戳，可变帧率源才能音画同步。
+     *  字段改名自旧的 recalculatePts（默认开），使已持久化的旧值失效、回落到新默认 */
+    forceCfr: boolean;
 }
 
 export interface AdvancedConfig {

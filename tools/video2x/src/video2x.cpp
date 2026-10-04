@@ -65,6 +65,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Destroy the ncnn global GPU instance explicitly on *every* exit path while all
+    // DLLs are still loaded. Leaving it to static destruction segfaults during DLL
+    // unload on Windows (ncnn/Vulkan teardown order). The guard is declared before
+    // every ncnn-owning local, so those are released first. Previously only the
+    // success path did this, so failed/aborted runs exited with a segfault (139)
+    // instead of 1/2.
+    struct NcnnGpuInstanceGuard {
+        ~NcnnGpuInstanceGuard() { ncnn::destroy_gpu_instance(); }
+    } ncnn_gpu_guard;
+
     // Initialize argument and configuration structs
     Arguments arguments;
     std::vector<video2x::processors::ProcessorConfig> proc_cfgs;
@@ -252,11 +262,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Destroy the ncnn global GPU instance explicitly while every DLL is still
-    // fully loaded. Leaving it to static destruction segfaults during DLL
-    // unload on Windows (ncnn/Vulkan teardown order), yielding a non-zero
-    // exit code even though all processing completed successfully.
-    ncnn::destroy_gpu_instance();
-
+    // ncnn GPU instance teardown is handled by ncnn_gpu_guard on every exit path
     return 0;
 }

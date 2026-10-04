@@ -1,10 +1,12 @@
 #include "interpolator_rife.h"
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 
 #include <spdlog/spdlog.h>
 
+#include "avutils.h"
 #include "conversions.h"
 #include "fsutils.h"
 #include "logger_manager.h"
@@ -133,8 +135,17 @@ int InterpolatorRIFE::interpolate(
         return AVERROR(ENOMEM);
     }
 
-    // Rescale PTS to encoder's time base
-    (*out_frame)->pts = av_rescale_q(in_frame->pts, in_time_base_, out_time_base_);
+    // The interpolated frame sits time_step of the way from prev_frame to in_frame.
+    // (It used to inherit in_frame's PTS, so every interpolated frame duplicated the
+    // next source frame's timestamp and the muxer aborted on non-increasing DTS.)
+    avutils::copy_frame_pts(in_frame, *out_frame, in_time_base_, out_time_base_);
+    if (prev_frame->pts != AV_NOPTS_VALUE && (*out_frame)->pts != AV_NOPTS_VALUE) {
+        int64_t p0 = av_rescale_q(
+            prev_frame->pts, avutils::frame_time_base(prev_frame, in_time_base_), out_time_base_
+        );
+        int64_t p1 = (*out_frame)->pts;
+        (*out_frame)->pts = p0 + std::llround(static_cast<double>(p1 - p0) * time_step);
+    }
 
     // Return the processed frame to the caller
     return ret;

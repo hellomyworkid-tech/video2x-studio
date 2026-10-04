@@ -192,6 +192,31 @@ float get_frame_diff(AVFrame* frame1, AVFrame* frame2) {
 }
 
 // Deleter for AVBufferRef unique_ptr
+AVRational frame_time_base(const AVFrame* frame, AVRational fallback) {
+    if (frame != nullptr && frame->time_base.num > 0 && frame->time_base.den > 0) {
+        return frame->time_base;
+    }
+    return fallback;
+}
+
+void copy_frame_pts(const AVFrame* src, AVFrame* dst, AVRational fallback_src_tb, AVRational dst_tb) {
+    AVRational src_tb = frame_time_base(src, fallback_src_tb);
+    if (src->pts == AV_NOPTS_VALUE || src_tb.num <= 0 || dst_tb.num <= 0) {
+        dst->pts = src->pts;
+    } else {
+        dst->pts = av_rescale_q(src->pts, src_tb, dst_tb);
+    }
+    dst->time_base = dst_tb;
+}
+
+void rescale_frame_pts(AVFrame* frame, AVRational src_tb, AVRational dst_tb) {
+    if (frame->pts != AV_NOPTS_VALUE && src_tb.num > 0 && src_tb.den > 0 && dst_tb.num > 0 &&
+        dst_tb.den > 0) {
+        frame->pts = av_rescale_q(frame->pts, src_tb, dst_tb);
+    }
+    frame->time_base = dst_tb;
+}
+
 void av_bufferref_deleter(AVBufferRef* bufferref) {
     if (bufferref != nullptr) {
         av_buffer_unref(&bufferref);

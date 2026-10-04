@@ -139,7 +139,15 @@ int Encoder::init(
     if (frm_rate_mul > 0) {
         AVRational in_frame_rate = avutils::get_video_frame_rate(ifmt_ctx, in_vstream_idx);
         enc_ctx_->framerate = {in_frame_rate.num * frm_rate_mul, in_frame_rate.den};
-        enc_ctx_->time_base = av_inv_q(enc_ctx_->framerate);
+        // Interpolated frames land at fractions of each source gap. A 1/framerate time
+        // base is too coarse for variable-frame-rate input (neighbours round onto the
+        // same tick and get dropped downstream), so subdivide the decoder's time base
+        // by the multiplier: every k/mul position of an integer-tick gap is then exact.
+        if (dec_ctx->time_base.num > 0 && dec_ctx->time_base.den > 0) {
+            enc_ctx_->time_base = av_mul_q(dec_ctx->time_base, {1, frm_rate_mul});
+        } else {
+            enc_ctx_->time_base = av_inv_q(enc_ctx_->framerate);
+        }
     } else {
         // Set the output video's time base
         if (dec_ctx->time_base.num > 0 && dec_ctx->time_base.den > 0) {
@@ -350,10 +358,32 @@ int Encoder::write_frame(AVFrame* frame, int64_t frame_idx) {
     // Let the encoder decide the frame type
     frame->pict_type = AV_PICTURE_TYPE_NONE;
 
-    // Calculate this frame's presentation timestamp (PTS)
-    if (enc_cfg_.recalculate_pts) {
-        frame->pts = av_rescale_q(frame_idx, av_inv_q(enc_ctx_->framerate), enc_ctx_->time_base);
+    // Single owner of output timestamps. By default the source timing carried by the
+    // frame (in its own time base) is preserved; recalculate_pts forces an index-based
+    // CFR timeline, which is also the fallback for frames without a timestamp.
+    AVRational enc_tb = enc_ctx_->time_base;
+    int64_t pts;
+    if (enc_cfg_.recalculate_pts || frame->pts == AV_NOPTS_VALUE) {
+        pts = av_rescale_q(frame_idx, av_inv_q(enc_ctx_->framerate), enc_tb);
+    } else {
+        pts = av_rescale_q(frame->pts, avutils::frame_time_base(frame, enc_tb), enc_tb);
     }
+    // The muxer treats a non-increasing timestamp as fatal; nudge it forward instead
+    // (e.g. two VFR frames rounding onto the same tick of a coarser output time base).
+    if (last_pts_ != AV_NOPTS_VALUE && pts <= last_pts_) {
+        if (!pts_fixup_warned_) {
+            logger()->warn(
+                "Non-increasing PTS {} after {}; adjusting to keep the stream monotonic",
+                pts,
+                last_pts_
+            );
+            pts_fixup_warned_ = true;
+        }
+        pts = last_pts_ + 1;
+    }
+    last_pts_ = pts;
+    frame->pts = pts;
+    frame->time_base = enc_tb;
 
     // Convert the frame to the encoder's pixel format if needed
     if (frame->format != enc_ctx_->pix_fmt) {

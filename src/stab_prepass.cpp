@@ -32,6 +32,17 @@ int StabilizationPrepass::analyze(
     AVCodecContext* dec_ctx = decoder.get_codec_context();
     int stream_idx = decoder.get_video_stream_index();
 
+    // libvidstab's motion fields (up to 32 px plus a 16 px search range) overrun tiny
+    // frames; on a 352x64 input this crashed intermittently depending on memory layout
+    if (dec_ctx->width < 128 || dec_ctx->height < 128) {
+        logger()->error(
+            "Stabilization requires a frame of at least 128x128 (input is {}x{})",
+            dec_ctx->width,
+            dec_ctx->height
+        );
+        return AVERROR(EINVAL);
+    }
+
     AVFilterGraph* graph = avfilter_graph_alloc();
     if (!graph) {
         logger()->error("Failed to allocate filter graph for vidstabdetect");

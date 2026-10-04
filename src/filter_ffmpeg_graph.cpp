@@ -198,9 +198,7 @@ int FilterFFmpegGraph::filter(AVFrame* in_frame, AVFrame** out_frame) {
     }
 
     // Rescale PTS to the encoder's time base
-    if (res_frame->pts != AV_NOPTS_VALUE && out_time_base_.num > 0 && out_time_base_.den > 0) {
-        res_frame->pts = av_rescale_q(res_frame->pts, in_time_base_, out_time_base_);
-    }
+    avutils::rescale_frame_pts(res_frame, av_buffersink_get_time_base(sink_ctx_), out_time_base_);
 
     *out_frame = res_frame;
     return 0;
@@ -224,9 +222,9 @@ int FilterFFmpegGraph::flush(std::vector<AVFrame*>& out_frames) {
             break;
         }
 
-        if (res_frame->pts != AV_NOPTS_VALUE && out_time_base_.num > 0 && out_time_base_.den > 0) {
-            res_frame->pts = av_rescale_q(res_frame->pts, in_time_base_, out_time_base_);
-        }
+        avutils::rescale_frame_pts(
+            res_frame, av_buffersink_get_time_base(sink_ctx_), out_time_base_
+        );
         out_frames.push_back(res_frame);
     }
 

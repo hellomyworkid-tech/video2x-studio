@@ -245,6 +245,14 @@ int VideoProcessor::process_frames(
         total_frames_.store(total_frames_.load() * filter_chain.get_frm_rate_mul());
     }
 
+    // Input-side frame counter and rate, used only to synthesize timestamps for
+    // streams that carry none
+    int64_t in_frame_idx = 0;
+    AVRational in_frame_rate = avutils::get_video_frame_rate(ifmt_ctx, in_vstream_idx);
+    if (in_frame_rate.num <= 0 || in_frame_rate.den <= 0) {
+        in_frame_rate = {25, 1};
+    }
+
     // Drain all currently-decodable frames and push them through the processing chain.
     // Returns 0 when no more frames are available right now (EAGAIN) or the decoder has
     // been fully drained (AVERROR_EOF); returns a negative AVERROR code on failure.
@@ -267,12 +275,28 @@ int VideoProcessor::process_frames(
                 return dret;
             }
 
-            // Calculate this frame's presentation timestamp (PTS)
+            // Stamp this frame's presentation timestamp (PTS) and the time base it is in.
+            // Every stage rescales from the frame's own time base, so the timestamp is
+            // converted exactly once on its way to the encoder.
             if (enc_cfg_.recalculate_pts) {
                 frame->pts = av_rescale_q(
                     frame_idx_, av_inv_q(enc_ctx->framerate), enc_ctx->time_base
                 );
+                frame->time_base = enc_ctx->time_base;
+            } else {
+                // Keep the source timing (VFR-safe); fall back to the best-effort
+                // timestamp, then to the input frame index for streams without PTS
+                if (frame->pts == AV_NOPTS_VALUE) {
+                    frame->pts = frame->best_effort_timestamp;
+                }
+                if (frame->pts == AV_NOPTS_VALUE) {
+                    frame->pts = av_rescale_q(
+                        in_frame_idx, av_inv_q(in_frame_rate), dec_ctx->time_base
+                    );
+                }
+                frame->time_base = dec_ctx->time_base;
             }
+            in_frame_idx++;
 
             // Process the frame based on the chain's composition
             AVFrame* proc_frame = nullptr;
@@ -543,6 +567,18 @@ int VideoProcessor::interpolate_and_write(
     processors::Interpolator* interpolator = filter_chain.get_interpolator();
     int frm_rate_mul = filter_chain.get_frm_rate_mul() > 0 ? filter_chain.get_frm_rate_mul() : 2;
 
+    // Everything leaving this function (interpolated, duplicated and original frames)
+    // is stamped in the encoder's time base, so the post-interp stages see one
+    // consistent timeline instead of a mix of decoder- and encoder-based timestamps
+    AVRational out_tb = encoder.get_encoder_context()->time_base;
+    int64_t cur_pts = filtered_holder->pts == AV_NOPTS_VALUE
+                          ? AV_NOPTS_VALUE
+                          : av_rescale_q(
+                                filtered_holder->pts,
+                                avutils::frame_time_base(filtered_holder.get(), out_tb),
+                                out_tb
+                            );
+
     float time_step = 1.0f / static_cast<float>(frm_rate_mul);
     float current_time_step = time_step;
 
@@ -578,6 +614,14 @@ int VideoProcessor::interpolate_and_write(
             proc_frame = av_frame_clone(prev_frame.get());
             if (proc_frame == nullptr) {
                 ret = AVERROR(ENOMEM);
+            } else if (proc_frame->pts != AV_NOPTS_VALUE && cur_pts != AV_NOPTS_VALUE) {
+                // Scene cut: the duplicate needs its own slot between prev and current
+                int64_t p0 = av_rescale_q(
+                    proc_frame->pts, avutils::frame_time_base(proc_frame, out_tb), out_tb
+                );
+                proc_frame->pts =
+                    p0 + std::llround(static_cast<double>(cur_pts - p0) * current_time_step);
+                proc_frame->time_base = out_tb;
             }
         }
 
@@ -601,6 +645,9 @@ int VideoProcessor::interpolate_and_write(
     if (original_out == nullptr) {
         return AVERROR(ENOMEM);
     }
+    avutils::rescale_frame_pts(
+        original_out, avutils::frame_time_base(original_out, out_tb), out_tb
+    );
     ret = write_frame_through_post(filter_chain, encoder, original_out);
     if (ret < 0) {
         return ret;
