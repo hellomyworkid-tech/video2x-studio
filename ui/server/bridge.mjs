@@ -1078,6 +1078,14 @@ const server = http.createServer(async (req, res) => {
             // 输出路径去重：同一路径已存在输出（或同批次撞名）时自动追加 _2/_3…，
             // 历史输出一律保留，绝不覆盖（断点续跑不走此接口，不受影响）
             const assigned = new Set();
+            // 尚未落盘的输出也要占位：排队/运行中的任务，以及可续跑的中止/失败任务。
+            // 否则分两次提交同名输出（如同一视频换模型对比）会拿到同一路径，后跑完的
+            // 覆盖先跑完的；PyTorch 引擎还会因断点指纹不符清掉前一个任务的续跑分片
+            for (const o of jobs.values()) {
+                const live = o.status === 'pending' || o.status === 'running'
+                    || ((o.status === 'aborted' || o.status === 'failed') && canResume(o));
+                if (live && o.outPath) assigned.add(o.outPath.toLowerCase());
+            }
             const dedupeOutPath = (p) => {
                 if (!p) return p;
                 const dir = path.dirname(p);

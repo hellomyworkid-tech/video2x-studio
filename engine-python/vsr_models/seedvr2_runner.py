@@ -31,7 +31,7 @@ WEIGHTS_DIR = ENGINE_DIR / 'weights' / 'SeedVR2-3B'
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, decode_cfr_args, encode_color_args  # noqa: E402
 
 
 def compute_output_dims(w0, h0, resolution):
@@ -128,6 +128,7 @@ def main(args):
     in_stat = os.stat(args.input)
     fingerprint = {
         'model': 'seedvr2', 'codec': args.codec, 'crf': args.crf,
+        'bitRate': int(getattr(args, 'bit_rate', 0) or 0), 'pipe': 2,  # 同 worker.py
         'resolution': resolution,
         'input': str(Path(args.input).resolve()),
         'isize': in_stat.st_size, 'imtime': int(in_stat.st_mtime),
@@ -250,7 +251,7 @@ def main(args):
         dec_pre = [] if seek_frame == 0 else ['-ss', f'{seek_frame / FPS:.6f}']
         # -frames:v 限定解码帧数，避免读够后关管道导致解码器刷 Broken pipe 报错
         dec_cmd = [str(FFMPEG), '-hide_banner', '-loglevel', 'error',
-                   *dec_pre, '-i', args.input,
+                   *dec_pre, '-i', args.input, *decode_cfr_args(fps_str),
                    '-frames:v', str(seg_end - seek_frame),
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
@@ -258,7 +259,7 @@ def main(args):
                    '-s', f'{oW}x{oH}', '-r', fps_str, '-i', 'pipe:0',
                    '-an', '-c:v', args.codec,
                    *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
-                   '-pix_fmt', 'yuv420p', seg_file]
+                   *encode_color_args(), '-pix_fmt', 'yuv420p', seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)
         enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)

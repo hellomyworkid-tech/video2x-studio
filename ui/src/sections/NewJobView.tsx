@@ -292,7 +292,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, on
                                     {isPython && (
                                         <p className="mb-3 flex items-start gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-cyan-200/90">
                                             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                                            旗舰引擎由 Python 推理后端执行：仅「编码器」与「CRF」生效，码率 / 像素格式 / AVOption / 流复制开关不适用（音频流默认保留）。
+                                            旗舰引擎由 Python 推理后端执行：「编码器」「CRF」「码率」生效，像素格式 / AVOption / 流复制开关不适用（音频流默认保留）。
                                         </p>
                                     )}
                                     <EncoderSection req={req} onChange={patch} bare />

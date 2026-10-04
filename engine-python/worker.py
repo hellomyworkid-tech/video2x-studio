@@ -238,6 +238,25 @@ def quality_args(codec, crf, bit_rate=0):
     return ['-crf', str(crf)]
 
 
+def decode_cfr_args(fps_str):
+    """解码端按平均帧率重采样为恒定帧率。
+    rawvideo 输出时 ffmpeg 默认按标称帧率（r_frame_rate）补重复帧，而分片 seek 与编码
+    时间戳都按平均帧率（avg_frame_rate）计算——可变帧率源两边帧号对不上，实测每个分片
+    内画面渐慢、分片边界前跳 1.6s。统一到平均帧率后音画偏差 ≤0.05s；恒定帧率源为恒等变换。
+    """
+    return ['-vf', f'fps={fps_str}']
+
+
+def encode_color_args():
+    """rgb24→yuv 按 BT.709 转换并写入色彩标签。
+    不指定时 ffmpeg 用 BT.601 且不打标签，播放器对无标签高清视频按 709 解码，实测
+    红/绿色块偏差达 22/255。标清源解码时 ffmpeg 会按其 601 正确转 RGB，输出统一 709 即可。
+    """
+    return ['-vf', 'scale=out_color_matrix=bt709:out_range=tv',
+            '-colorspace', 'bt709', '-color_primaries', 'bt709',
+            '-color_trc', 'bt709', '-color_range', 'tv']
+
+
 def fmt_hms(seconds):
     seconds = max(0, int(seconds))
     return f'{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}:{seconds % 60:02d}'
@@ -455,6 +474,9 @@ def main():
     in_stat = os.stat(args.input)
     fingerprint = {
         'model': args.model, 'codec': args.codec, 'crf': args.crf,
+        # 码率与质量档同为编码参数，漏掉会让改码率后续跑的新旧分片按不同码控拼接；
+        # pipe=2：编码端改为 BT.709 + 解码端恒定帧率，旧管道的分片不能与新分片混拼
+        'bitRate': int(getattr(args, 'bit_rate', 0) or 0), 'pipe': 2,
         'input': str(Path(args.input).resolve()),
         'isize': in_stat.st_size, 'imtime': int(in_stat.st_mtime),
         'w': W, 'h': H, 'fps': round(FPS, 3), 'total': TOTAL,
@@ -522,7 +544,7 @@ def main():
         # -frames:v 限定解码帧数：不加的话解码器会一直解到文件尾，等我们读够就
         # 关管道，ffmpeg 拿到 EPIPE 刷一屏 "Broken pipe / Error muxing" 红字
         dec_cmd = [str(FFMPEG), '-hide_banner', '-loglevel', 'error',
-                   *dec_pre, '-i', args.input,
+                   *dec_pre, '-i', args.input, *decode_cfr_args(fps_str),
                    '-frames:v', str(seg_end - seek_frame),
                    '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1']
         enc_cmd = [str(FFMPEG), '-y', '-hide_banner', '-loglevel', 'error',
@@ -530,7 +552,7 @@ def main():
                    '-s', f'{OW}x{OH}', '-r', fps_str, '-i', 'pipe:0',
                    '-an', '-c:v', args.codec,
                    *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
-                   '-pix_fmt', 'yuv420p', seg_file]
+                   *encode_color_args(), '-pix_fmt', 'yuv420p', seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)
         enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
