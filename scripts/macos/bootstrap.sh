@@ -43,6 +43,9 @@ fi
 
 step "前端依赖（ui/node_modules）"
 if [ ! -d "$ROOT/ui/node_modules" ]; then (cd "$ROOT/ui" && npm ci); else echo "已存在（需要重装时删掉 ui/node_modules 再运行）"; fi
+# Electron 43 起 npm ci 不再下载本体，首次运行时才去下载（且不一定带上镜像变量），这里显式下好
+if [ ! -f "$ROOT/ui/node_modules/electron/path.txt" ]; then (cd "$ROOT/ui" && node node_modules/electron/install.js); fi
+echo "Electron $("$ROOT/ui/node_modules/.bin/electron" --version)"
 
 step "体检"
 bash "$ROOT/scripts/macos/doctor.sh"

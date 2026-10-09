@@ -74,9 +74,16 @@ check('grid_sample fp16', lambda: torch.nn.functional.grid_sample(img, grid, ali
 check('interpolate bicubic + antialias', lambda: torch.nn.functional.interpolate(
     img.float(), scale_factor=0.5, mode='bicubic', antialias=True))
 
-# 5) FP8：预期不支持——SwiftVR 的 FP8 权重必须在 CPU 上还原后再上 MPS（docs/macos/01-feasibility.md D5）
+# 5) FP8：SwiftVR 的 FP8Linear 前向要在设备上把 w8 还原为 bf16（docs/macos/01-feasibility.md D5）。
+#    只测"能否放上 MPS"会误报：torch 2.14 上 fp8 张量能拷上 MPS，但任何转换都报 Undefined type。
 try:
-    torch.zeros(16, dtype=torch.float8_e4m3fn).to(dev)
-    print('  [INFO] float8_e4m3fn 可以放上 MPS（与 2026-10 的调研结论不同，值得重新评估 D5）')
+    w8 = torch.zeros(16, dtype=torch.float8_e4m3fn).to(dev)
 except Exception as e:  # noqa: BLE001
-    print(f'  [INFO] float8_e4m3fn 不能放上 MPS（符合预期）：{str(e).splitlines()[0][:100]}')
+    print(f'  [INFO] float8_e4m3fn 不能放上 MPS（D5 成立）：{str(e).splitlines()[0][:100]}')
+else:
+    try:
+        w8.to(torch.bfloat16)
+        print('  [INFO] MPS 上 float8_e4m3fn → bf16 可用（与 2026-10 的结论不同，值得重新评估 D5）')
+    except Exception as e:  # noqa: BLE001
+        print(f'  [INFO] float8_e4m3fn 能放上 MPS，但不能在 MPS 上转换（D5 成立：在 CPU 上还原）：'
+              f'{str(e).splitlines()[0][:100]}')
