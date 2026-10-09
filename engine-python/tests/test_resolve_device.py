@@ -48,6 +48,15 @@ def test_malformed_passthrough():
     assert resolve_device('cuda:abc') == 'cuda:abc'
 
 
+def test_mps_normalized():
+    # Apple GPU 只有一个 MPS 设备：带不带索引都归一为 'mps'，且不会落到 cpu
+    assert resolve_device('mps') == 'mps'
+    assert resolve_device('mps:0') == 'mps'
+    # 大小写敏感，与 'CUDA' 一致
+    assert resolve_device('MPS') == 'cpu'
+    validate_cuda_device('mps')   # 非 cuda: 前缀直接返回，不触发 fail
+
+
 # ---- validate_cuda_device：早退路径（无需 torch） ----
 
 def test_validate_early_return_without_index():

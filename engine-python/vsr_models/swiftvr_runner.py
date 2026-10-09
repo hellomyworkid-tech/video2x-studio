@@ -41,9 +41,18 @@ for p in (str(ENGINE_DIR), str(VENDOR_DIR), str(LIBS_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+# vendor 的 swiftvr/io.py 在模块顶层 import decord，但本项目用 ffmpeg 管道读帧，从不调用它。
+# decord 没有 macOS arm64 + Python 3.12 的 wheel：缺失时放一个空模块占位，不改 vendor 代码
+try:
+    import decord  # noqa: F401
+except ImportError:
+    import types
+    sys.modules['decord'] = types.SimpleNamespace(bridge=types.SimpleNamespace(set_bridge=lambda *a, **k: None))
+
 from worker import (probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog,  # noqa: E402
                     pause_requested, resolve_device, validate_cuda_device, quality_args,
-                    decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest)
+                    decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest,
+                    is_oom_error, empty_device_cache, device_allocated_gb)
 
 FP8_MAX = 448.0          # float8_e4m3fn 可表示的最大值
 FP8_MIN_PARAMS = 1 << 20  # 参数量不足此值的 Linear 保持原精度（省不了多少显存，最影响数值）
@@ -211,6 +220,88 @@ def build_fp8_transformer(dev, dtype, log_fn):
     return tr
 
 
+def _fuse_projections_linear(transformer):
+    """bf16 版的 QKV 融合：用 vendor 的 fuse_projections 拼出 to_qkv / to_kv，再删掉不再使用的
+    原始投影层（与 _fuse_projections_fp8 相同的省内存做法）"""
+    from swiftvr.models.transformer import WanAttention
+    for m in transformer.modules():
+        if not isinstance(m, WanAttention) or getattr(m, 'fused_projections', False):
+            continue
+        if getattr(m, 'added_kv_proj_dim', None) is not None:
+            raise RuntimeError('暂不支持带 added_kv 投影的配置')
+        m.fuse_projections()
+        for n in (('to_q', 'to_k', 'to_v') if m.cross_attention_dim_head is None else ('to_k', 'to_v')):
+            delattr(m, n)
+
+
+def build_bf16_transformer(dev, dtype, log_fn):
+    """MPS 用：构造已融合的普通 bf16 transformer，权重常驻约 10 GB。
+    MPS 能存 float8_e4m3fn 却不能在设备上转换（实测 torch 2.14："Undefined type Float8_e4m3fn"），
+    FP8Linear 的前向还原无法在 MPS 上执行。权重来源：
+    - 官方原版 FP32（transformer/diffusion_pytorch_model.safetensors）：直接转 bf16，没有 FP8 量化损失，优先使用
+    - 预转换 FP8 文件：在 CPU 上逐层按 FP8Linear 前向的同一算式（w8.to(bf16) * scale）还原，再搬上设备
+    """
+    import torch
+    import torch.nn as nn
+    from safetensors import safe_open
+    from swiftvr.models import WanTransformer3DModel
+
+    cfg = json.loads((WEIGHTS_DIR / 'transformer' / 'config.json').read_text(encoding='utf-8'))
+    cfg = {k: v for k, v in cfg.items() if not k.startswith('_')}
+    prev_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(dtype)
+    try:
+        with torch.device('meta'):
+            tr = WanTransformer3DModel(**cfg)
+    finally:
+        torch.set_default_dtype(prev_dtype)
+
+    src = WEIGHTS_DIR / 'transformer' / 'diffusion_pytorch_model.safetensors'
+    if src.exists():
+        log_fn('载入官方原版权重（FP32 → bf16）')
+        tr = tr.to_empty(device=dev)
+        with safe_open(str(src), framework='pt', device='cpu') as f:
+            keys = set(f.keys())
+            state = tr.state_dict()
+            missing = [k for k in state if k not in keys]
+            if missing:
+                raise RuntimeError(f'官方权重文件缺少 {len(missing)} 个张量（如 {missing[0]}）')
+            with torch.no_grad():
+                for k, t in state.items():
+                    t.copy_(f.get_tensor(k).to(t.dtype))
+        _fuse_projections_linear(tr)
+    elif FP8_FILE.exists():
+        log_fn(f'载入预转换 FP8 权重并在 CPU 上还原为 bf16：{FP8_FILE.name}')
+        FP8Linear = _fp8_linear_cls()
+        _swap_in_fp8(tr.blocks, FP8Linear, dtype)
+        _fuse_projections_fp8(tr, FP8Linear, dtype)
+        tr = tr.to_empty(device='cpu')
+        with safe_open(str(FP8_FILE), framework='pt', device='cpu') as f:
+            keys = set(f.keys())
+            state = tr.state_dict()
+            missing = [k for k in state if k not in keys]
+            if missing:
+                raise RuntimeError(f'FP8 权重文件缺少 {len(missing)} 个张量（如 {missing[0]}）')
+            with torch.no_grad():
+                for k, t in state.items():
+                    t.copy_(f.get_tensor(k))
+        with torch.no_grad():
+            for name, mod in [(n, m) for n, m in tr.named_modules() if isinstance(m, FP8Linear)]:
+                lin = nn.Linear(mod.in_features, mod.out_features, bias=mod.bias is not None,
+                                device=dev, dtype=dtype)
+                lin.weight.copy_(mod.w8.to(dtype) * mod.scale.to(dtype))
+                if mod.bias is not None:
+                    lin.bias.copy_(mod.bias)
+                parent, _, attr = name.rpartition('.')
+                setattr(tr.get_submodule(parent), attr, lin)   # 逐层替换，CPU 上的 FP8 副本随之释放
+        tr = tr.to(dev)
+    else:
+        raise FileNotFoundError(f'未找到 SwiftVR 权重：{src} 或 {FP8_FILE.name}')
+    _reinit_nonpersistent_buffers(tr, cfg, dev, dtype)
+    empty_device_cache(dev)
+    return tr
+
+
 def _reinit_nonpersistent_buffers(tr, cfg, dev, dtype):
     """meta 构造 + to_empty 后，不在 state_dict 里的缓冲（如 RoPE 频率表）是垃圾内存。
     用同配置在 CPU 上构造一个只含这些缓冲的模块副本，把值拷回来。"""
@@ -236,6 +327,8 @@ def pick_fp8_compute(dev):
     """FP8 张量核计算是否可用：返回 (开关, 说明)。需 sm_89 及以上（Ada / Hopper / Blackwell），
     并实际跑一次 _scaled_mm 确认当前 PyTorch 支持。"""
     import torch
+    if not str(dev).startswith('cuda'):
+        return False, 'bf16（MPS 不支持 FP8 计算）'
     if os.environ.get('V2X_SWIFTVR_FP8_COMPUTE', '').strip() == '0':
         return False, 'bf16（V2X_SWIFTVR_FP8_COMPUTE=0 强制关闭）'
     cap = torch.cuda.get_device_capability(dev)
@@ -259,7 +352,10 @@ def load_pipeline(dev, log_fn):
     from swiftvr.runner import enable_max_fps_runtime
 
     dtype = torch.bfloat16
-    transformer = build_fp8_transformer(dev, dtype, log_fn)
+    if dev == 'mps':
+        transformer = build_bf16_transformer(dev, dtype, log_fn)
+    else:
+        transformer = build_fp8_transformer(dev, dtype, log_fn)
     reae = ReAE(str(WEIGHTS_DIR / 'reae.safetensors'))
     prompt_emb = load_file(str(WEIGHTS_DIR / 'prompt_embedding.safetensors'))['prompt_emb'][0]
     pipe = SwiftVRPipeline(reae, transformer, prompt_emb)
@@ -328,21 +424,38 @@ def main(args):
     log(f'SwiftVR: 输出 {oW}x{oH}')
 
     dev = resolve_device(args.device)
-    if not dev.startswith('cuda'):
-        fail(f'SwiftVR 需要 CUDA 设备（收到 --device {args.device}）')
-    validate_cuda_device(dev)
-    torch.cuda.set_device(dev)
-    total_gb = torch.cuda.get_device_properties(dev).total_memory / 2**30
-    free_gb = torch.cuda.mem_get_info(dev)[0] / 2**30
-    if total_gb < 15:
-        fail(f'SwiftVR 需要 16 GB 级显存（当前 {total_gb:.1f} GB）：50 亿参数模型即使 FP8 也需约 5 GB 权重常驻，'
-             '再加推理所需显存')
-    # 显存上限：超出即 OOM（随后自动减小分段重试），而不是被 Windows 驱动挪到
-    # 系统内存——那样不报错，但速度会跌到原来的几十分之一
-    torch.cuda.set_per_process_memory_fraction(max(0.5, (free_gb - 0.3) / total_gb), dev)
-    # 模型要求 4 的倍数（ReAE 时间维 4 倍压缩）
-    clip_len = max(4, args.clip_len // 4 * 4) if args.clip_len > 0 else initial_clip_len(oW * oH, total_gb)
-    log(f'显存 {total_gb:.1f} GB（空闲 {free_gb:.1f} GB），初始分段 {clip_len} 帧')
+    if dev == 'mps':
+        if not torch.backends.mps.is_available():
+            fail('MPS 不可用：需要 Apple Silicon 与 macOS 14 及以上')
+        # 统一内存：PyTorch 可用的上限是 recommended_max_memory（worker.py 已把 MPS 水位卡在 1.0 倍，
+        # 超出即 OOM，不会转为换页）。bf16 权重常驻约 10 GB，比 CUDA 的 FP8 多约 5 GB
+        rec_gb = torch.mps.recommended_max_memory() / 2**30
+        if rec_gb < 15:
+            fail(f'SwiftVR 在 Mac 上需要约 24 GB 及以上的统一内存（当前 GPU 可用上限 {rec_gb:.1f} GB）：'
+                 'bf16 权重就要约 10 GB 常驻，再加推理所需内存')
+        # 初始分段沿用 CUDA 的经验表（按扣掉多出的 5 GB 权重后的等效显存查），与 Windows 输出一致。
+        # 不为省内存改小：分段即 DiT 每次联合处理的时间跨度（clip/4 个潜空间帧，runner 不做重叠），
+        # M5 Max 实测（720p 真值、640x360 劣化输入）：分段 4 / 8 / 16 / 24 的 PSNR 为
+        # 26.84 / 27.33 / 27.45 / 27.47 dB，帧间闪烁 3.51 / 3.20 / 3.16 / 3.14，分段 4 明显更差；
+        # 而 MPS 上速度几乎不随分段变（2K：4 帧 3.14 fps、8 帧 3.09 fps），省内存换不来速度
+        clip_len = max(4, args.clip_len // 4 * 4) if args.clip_len > 0 else initial_clip_len(oW * oH, rec_gb - 5)
+        log(f'统一内存：GPU 可用上限 {rec_gb:.1f} GB，初始分段 {clip_len} 帧')
+    else:
+        if not dev.startswith('cuda'):
+            fail(f'SwiftVR 需要 CUDA 或 MPS 设备（收到 --device {args.device}）')
+        validate_cuda_device(dev)
+        torch.cuda.set_device(dev)
+        total_gb = torch.cuda.get_device_properties(dev).total_memory / 2**30
+        free_gb = torch.cuda.mem_get_info(dev)[0] / 2**30
+        if total_gb < 15:
+            fail(f'SwiftVR 需要 16 GB 级显存（当前 {total_gb:.1f} GB）：50 亿参数模型即使 FP8 也需约 5 GB 权重常驻，'
+                 '再加推理所需显存')
+        # 显存上限：超出即 OOM（随后自动减小分段重试），而不是被 Windows 驱动挪到
+        # 系统内存——那样不报错，但速度会跌到原来的几十分之一
+        torch.cuda.set_per_process_memory_fraction(max(0.5, (free_gb - 0.3) / total_gb), dev)
+        # 模型要求 4 的倍数（ReAE 时间维 4 倍压缩）
+        clip_len = max(4, args.clip_len // 4 * 4) if args.clip_len > 0 else initial_clip_len(oW * oH, total_gb)
+        log(f'显存 {total_gb:.1f} GB（空闲 {free_gb:.1f} GB），初始分段 {clip_len} 帧')
 
     # ------------------------------------------------------------------
     # 断点续跑：宏分片 + 检查点（协议与 worker.py / seedvr2_runner.py 一致）
@@ -404,9 +517,11 @@ def main(args):
         log('加载 SwiftVR 模型...')
         try:
             pipe = load_pipeline(dev, log)
-        except torch.OutOfMemoryError:
+        except Exception as e:  # noqa: BLE001
+            if not is_oom_error(e):
+                raise
             fail('加载模型时显存不足：请关闭其他占用显存的程序后重试')
-        w_gb = torch.cuda.memory_allocated(dev) / 2**30
+        w_gb = device_allocated_gb(dev)
         log(f'模型加载完成（{time.time() - t_load:.0f}s，权重常驻 {w_gb:.1f} GB）')
 
     frame_bytes = W * H * 3
@@ -595,9 +710,11 @@ def main(args):
             try:
                 run_macro(seg_start, seg_end, clip)
                 break
-            except torch.OutOfMemoryError:
+            except Exception as e:  # noqa: BLE001
+                if not is_oom_error(e):
+                    raise
                 written = base
-                torch.cuda.empty_cache()
+                empty_device_cache(dev)
                 if clip <= 4:
                     fail(f'显存不足：输出 {oW}x{oH} 在最小分段下仍放不下。请降低目标分辨率，'
                          '或关闭其他占用显存的程序')

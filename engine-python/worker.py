@@ -46,15 +46,27 @@ if os.name == 'nt':
     os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'garbage_collection_threshold:0.8')
 else:
     os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+if sys.platform == 'darwin':
+    # MPS 默认上限是 recommended_max_memory 的 1.7 倍，超过物理内存后不报错、转为换页，
+    # 速度暴跌（同 Windows 显存溢出到共享内存）。卡在 1.0 倍：超限即报 OOM，走分段减半重试。
+    # 低水位默认 1.4，必须不高于高水位，否则首次调用 MPS 就报 "invalid low watermark ratio"
+    os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '1.0')
+    os.environ.setdefault('PYTORCH_MPS_LOW_WATERMARK_RATIO', '1.0')
 os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
 import numpy as np
 
 ENGINE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = ENGINE_DIR.parent
-FFMPEG_DIR = PROJECT_ROOT / 'third_party' / 'ffmpeg-shared' / 'bin'
-FFMPEG = FFMPEG_DIR / 'ffmpeg.exe'
-FFPROBE = FFMPEG_DIR / 'ffprobe.exe'
+if os.name == 'nt':
+    FFMPEG_DIR = PROJECT_ROOT / 'third_party' / 'ffmpeg-shared' / 'bin'
+    FFMPEG = FFMPEG_DIR / 'ffmpeg.exe'
+    FFPROBE = FFMPEG_DIR / 'ffprobe.exe'
+else:
+    # macOS 开发期用 Homebrew 的 ffmpeg@7（keg-only，不在 PATH 上）；bridge 通过 VIDEO2X_FFMPEG_DIR 传入
+    FFMPEG_DIR = Path(os.environ.get('VIDEO2X_FFMPEG_DIR') or '/opt/homebrew/opt/ffmpeg@7/bin')
+    FFMPEG = FFMPEG_DIR / 'ffmpeg'
+    FFPROBE = FFMPEG_DIR / 'ffprobe'
 
 
 CHUNK_AUTO = -1   # --chunk 未显式指定的哨兵值（0 是非法块长，不能兼作哨兵）
@@ -74,11 +86,40 @@ def resolve_device(raw):
 
     torch.cuda.set_device 不接受无索引的 'cuda'（抛 ValueError），而 .to('cuda')
     可以接受 —— 两个 API 容忍度不同，三个引擎统一在此归一，避免各处重复兜底。
-    非 cuda 值（如 'cpu'）原样返回 'cpu'，由调用方决定是否支持。"""
+    'mps' / 'mps:0' → 'mps'（Apple GPU 只有一个设备）。其他值一律返回 'cpu'，由调用方决定是否支持。"""
     s = str(raw or 'cuda')
+    if s.startswith('mps'):
+        return 'mps'
     if not s.startswith('cuda'):
         return 'cpu'
     return s if ':' in s else 'cuda:0'
+
+
+def is_oom_error(e):
+    """CUDA 显存不足抛 torch.OutOfMemoryError；MPS 抛的是普通 RuntimeError
+    （"MPS backend out of memory"），两者都要走分段减半重试。
+    只认 MPS 这一条消息：CUDA 上其他含 out of memory 的 RuntimeError 维持原样直接报错"""
+    import torch
+    return isinstance(e, torch.OutOfMemoryError) or (
+        isinstance(e, RuntimeError) and 'MPS backend out of memory' in str(e))
+
+
+def empty_device_cache(device):
+    import torch
+    if str(device).startswith('cuda'):
+        torch.cuda.empty_cache()
+    elif str(device) == 'mps':
+        torch.mps.empty_cache()
+
+
+def device_allocated_gb(device):
+    """当前进程在该设备上已分配的张量内存（GB）"""
+    import torch
+    if str(device).startswith('cuda'):
+        return torch.cuda.memory_allocated(device) / 2**30
+    if str(device) == 'mps':
+        return torch.mps.current_allocated_memory() / 2**30
+    return 0.0
 
 
 def validate_cuda_device(device):
