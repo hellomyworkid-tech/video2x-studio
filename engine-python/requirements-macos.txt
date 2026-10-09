@@ -1,0 +1,74 @@
+# macOS（Apple Silicon）Python 3.12 依赖：由 Windows 实际环境（requirements-windows-lock.txt）派生。
+# 去掉了 CUDA / Windows 专用的 sageattention、triton-windows、colorama；torch 用 PyPI 上的 macOS 版（自带 MPS）。
+# 其余包锁定与 Windows 相同的版本，保证两个平台行为一致；某个版本缺 macOS arm64 wheel 时，
+# 换成最接近的有 wheel 的版本，并在此注明原因。
+# 安装：engine-python/.venv/bin/pip install -r engine-python/requirements-macos.txt
+# SwiftVR 另需依赖覆盖层：pip install --no-deps --target engine-python/swiftvr-libs diffusers==0.36.0
+#   （decord 在 macOS arm64 + Python 3.12 没有可用 wheel，runner 会注入空模块，见 docs/macos/01-feasibility.md D7）
+torch>=2.11
+torchvision>=0.26
+accelerate==1.14.0
+annotated-doc==0.0.4
+antlr4-python3-runtime==4.9.3
+anyio==4.14.2
+certifi==2026.7.22
+charset-normalizer==3.4.9
+click==8.4.2
+contourpy==1.3.3
+cycler==0.12.1
+diffusers==0.33.1
+easydict==1.13
+einops==0.8.2
+filelock==3.32.0
+fonttools==4.63.0
+fsspec==2026.6.0
+ftfy==6.3.1
+gguf==0.19.0
+h11==0.16.0
+hf-xet==1.5.2
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==0.36.2
+idna==3.18
+ImageIO==2.37.4
+imageio-ffmpeg==0.6.0
+importlib_metadata==9.0.0
+Jinja2==3.1.6
+kiwisolver==1.5.0
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+matplotlib==3.11.1
+mdurl==0.1.2
+modelscope==1.38.1
+modelscope-hub==0.1.8
+mpmath==1.3.0
+networkx==3.6.1
+numpy==2.5.1
+omegaconf==2.3.1
+opencv-python-headless==5.0.0.93
+packaging==26.2
+peft==0.19.1
+pillow==12.3.0
+psutil==7.2.2
+Pygments==2.20.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+regex==2026.7.19
+requests==2.34.2
+rich==15.0.0
+rotary-embedding-torch==0.9.1
+safetensors==0.8.0
+sentencepiece==0.2.2
+setuptools==78.1.0
+shellingham==1.5.4
+six==1.17.0
+sympy==1.14.0
+tokenizers==0.20.3
+tqdm==4.70.0
+transformers==4.46.2
+typer==0.27.0
+typing_extensions==4.16.0
+urllib3==2.7.0
+wcwidth==0.8.2
+zipp==4.1.0

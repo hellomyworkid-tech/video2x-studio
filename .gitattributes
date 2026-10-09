@@ -1,1 +1,4 @@
 models/** linguist-vendored
+
+# shell 脚本在任何平台检出都保持 LF（CRLF 会让 macOS/Linux 上的 bash 报错）
+*.sh text eol=lf
