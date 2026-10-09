@@ -101,7 +101,8 @@ __pycache__/
 # 模型权重（通过内置资产下载系统获取，含国内镜像）
 engine-python/weights/
 engine-python/downloads/
-models/
+# 只忽略仓库根的 ncnn 模型目录；不带前导 / 会连 vendor 里的 Python 包 models/ 一起忽略
+/models/
 
 # 第三方预编译依赖（ffmpeg/ncnn 等，构建脚本可重新获取）
 third_party/

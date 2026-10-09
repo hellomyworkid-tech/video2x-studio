@@ -1,0 +1,1 @@
+SOURCE: https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler @ baec4b6 (2025-12-24, v2.5.24)
