@@ -36,7 +36,7 @@
 | 加速库 | SageAttention 2 + triton-windows + `torch._scaled_mm` | 全部不可用，统一走 PyTorch SDPA | — | 现有代码已有自检/回退逻辑，但 SwiftVR/SeedVR2 入口目前硬性要求 `cuda:N`，需放开 |
 | 打包 | 嵌入式 CPython（`engine-python/python/python.exe`） | python-build-standalone（可重定位 CPython）放进包内；FFmpeg/ncnn/MoltenVK 的 dylib 随包并修正 rpath | 中 | 正式分发要 Apple Developer ID 签名 + 公证；自用 ad-hoc 签名即可 |
 
-## 2. Mac 硬件预期（全部待实测）
+## 2. Mac 硬件预期
 
 先在 Mac 上跑 `scripts/macos/doctor.sh`，确认芯片型号与统一内存大小，再按下表定目标。
 
@@ -58,6 +58,23 @@
 - PyTorch 在 macOS 14+ 的 MPS 上支持 bf16，但 M1–M3 没有 bf16 硬件，是模拟执行，实测比 fp16 慢约一倍；M4 起原生支持。
 - 所以 M4 及以后用 bf16（与 Windows 一致）。
 - M1–M3 先试 fp16，必须验证没有溢出（输出出现 NaN 或黑帧即溢出）。
+
+### 实测：M5 Max（32 核 GPU）/ 36 GB / macOS 27.0.1，PyTorch 2.14.1（2026-10-09）
+
+| 项目 | 实测 |
+|---|---|
+| matmul fp16 / bf16（8192³ 稳态） | 47.4 / 47.3 TFLOPS；fp32 约 12 TFLOPS |
+| Conv3d 128→128 k3（VAE 量级） | fp16 33 TFLOPS，bf16 41 TFLOPS |
+| SDPA fp16（24 头 × 4096 × 128） | 5.0～5.3 ms，约 39 TFLOPS |
+| `torch.mps.recommended_max_memory()` | 28.1 GB |
+| FP8（`float8_e4m3fn`） | 能拷上 MPS，但转 bf16/fp16、量化、`_scaled_mm` 全部报错（"Undefined type Float8_e4m3fn" / 未实现），即只能存不能算 |
+| ncnn（MoltenVK）Real-ESRGAN animevideov3，854×480→2× | 稳态约 13 fps（去掉编码也一样），启动约 1 s。ncnn 报 `fp16-cm=0`：没有 cooperative matrix，卷积只能走普通着色器 |
+
+与上面预期不同的地方：
+
+- **半精度算力不是低一个数量级，而是约为 RTX 5070 Ti bf16（90 TFLOPS）的一半。** bf16 与 fp16 一样快，SwiftVR 沿用 bf16 即可。旗舰引擎"慢数倍到十几倍"的预期对这台机器偏悲观，按算力比推算 SwiftVR 的上限约为 Windows bf16 版的一半，实际待阶段 3 实测。
+- **ncnn 引擎反而差距更大。** 同样 72 帧（含启动），Windows 约 3 s，Mac 约 6～7 s；Mac 稳态每帧约 75 ms。Windows 稳态没有单独测过，按含启动的总时间看约慢 2 倍，稳态差距只会更大。很可能的原因是 MoltenVK 上没有 cooperative matrix（N 卡上走张量核），这是 ncnn + MoltenVK 路线本身的上限。
+- **36 GB 放得下 SwiftVR 2K（按估算）：** Windows 2K 峰值约 13.8 GB，含约 5 GB FP8 权重；换成约 10 GB 的 bf16 权重后约 19 GB，低于 28.1 GB 上限。待阶段 3 实测。
 
 ## 3. 已核实的外部事实（2026-10 联网查证）
 
@@ -101,6 +118,10 @@
   - 新增"MPS 载入路径"：读 `swiftvr_transformer_fp8.safetensors`，在 CPU 上按 `w8 * scale` 还原为 bf16/fp16，再整体搬到 MPS，不用 `FP8Linear`。
   - 也可以一次性用 19 GB 官方原版权重转出一份 bf16 文件（约 10 GB）给 Mac 专用。
   - 两种做法的画质差都在 PSNR≈50 dB 级。
+  - 实测补充（M5 Max，torch 2.14.1）：
+    - FP8 只能存在 MPS 上，不能在 MPS 上转换，所以"在 CPU 上还原"仍是必要的。
+    - 折中做法可行：FP8 以 uint8 常驻 MPS，前向用 256 项查表还原为 bf16。还原结果与 CPU 逐位一致，线性层慢约 30%，权重常驻内存减半（约 5 GB）。36 GB 机器用不上，留给 24 GB 机型。
+    - Mac 反正要常驻 bf16 权重，用官方原版权重转出的 bf16 没有 FP8 量化损失，内存占用相同，因此优先用官方原版（迁移包的可选部分，`restore-on-mac.sh --with-optional`）。
 - **D6 SeedVR2 权重：**
   - Mac 上资产系统改为下载 `seedvr2_ema_3b_fp16.safetensors`。
   - `bridge.mjs` 的 `PY_WEIGHTS.seedvr2` 与资产表按平台选文件，`seedvr2_runner` 的 DiT 文件名同步。

@@ -7,13 +7,15 @@
 
 | 位置 | 现状 | Mac 处理 |
 |---|---|---|
-| `src/conversions.cpp:14,71,111`、`src/encoder.cpp:353,449`、`src/libvideo2x.cpp:32`、`src/avutils.cpp:139` | `[[gnu::target_clones("arch=x86-64-v4", "arch=x86-64-v3", "default")]]`。函数多版本依赖 ELF 的 ifunc；MSVC 会忽略这个属性 | 定义宏 `V2X_TARGET_CLONES`：仅在 `__x86_64__ && __linux__` 时展开为该属性，其他平台为空。7 处统一替换 |
-| `CMakeLists.txt:132-168` | `if(WIN32)` 链接 `third_party/ffmpeg-shared` 的 `.lib`；else 分支用 pkg-config | Mac 走 else 分支。configure 时设 `PKG_CONFIG_PATH=$(brew --prefix ffmpeg@7)/lib/pkgconfig`（ffmpeg@7 是 keg-only，必须手动指） |
+| `src/conversions.cpp:14,71,111`、`src/encoder.cpp:353,449`、`src/libvideo2x.cpp:32`、`src/avutils.cpp:139` | `[[gnu::target_clones("arch=x86-64-v4", "arch=x86-64-v3", "default")]]`。函数多版本依赖 ELF 的 ifunc；MSVC 会忽略这个属性 | 定义宏 `V2X_TARGET_CLONES`（在 `libvideo2x_export.h`）：仅在 `__x86_64__ && __linux__` 时展开为该属性，其他平台为空。7 处统一替换。**实测：** Apple Clang 对它只报警告（每处 4 条）并忽略，不会导致编译失败；改宏是为了清掉这 28 条警告 |
+| `CMakeLists.txt:132-168` | `if(WIN32)` 链接 `third_party/ffmpeg-shared` 的 `.lib`；else 分支用 pkg-config | Mac 走 else 分支。configure 时设 `PKG_CONFIG_PATH=$(brew --prefix ffmpeg@7)/lib/pkgconfig`（ffmpeg@7 是 keg-only，必须手动指）。**实测：** else 分支原来链接 `_LIBRARIES`（裸库名 `-lavcodec`），keg-only 时链接器找不到，已改为 `_LINK_LIBRARIES`（完整路径），Linux 上同样适用 |
 | `CMakeLists.txt:156` | else 分支 `target_include_directories` 里误写了 `${libavfilter_LIBRARIES}`（应为 `_INCLUDE_DIRS`），上游原样 | 顺手改正，否则 avfilter 头文件可能找不到 |
-| `CMakeLists.txt:170-182` | Windows 用 `third_party/ncnn-shared` 预编译 DLL | `-DVIDEO2X_USE_EXTERNAL_NCNN=ON` → `find_package(ncnn)`（Homebrew ncnn，带 MoltenVK） |
+| `CMakeLists.txt:170-182` | Windows 用 `third_party/ncnn-shared` 预编译 DLL | `-DVIDEO2X_USE_EXTERNAL_NCNN=ON` → `find_package(ncnn)`（Homebrew ncnn，带 MoltenVK）。**实测：** Homebrew 的 ncnn 带 libomp 编译，导出目标依赖 `OpenMP::OpenMP_CXX`，要传 `-DOpenMP_ROOT=$(brew --prefix libomp)`，并且因为项目的 `cmake_minimum_required` 早于 3.12，还要 `-DCMAKE_POLICY_DEFAULT_CMP0074=NEW` 才会生效（已写进 `build-core.sh`） |
+| `CMakeLists.txt:44`（Release 链接参数） | `-Wl,-s -Wl,--gc-sections` 是 GNU ld 参数 | **实测：** 苹果的 ld64 不认 `--gc-sections`，链接失败。已加 `if(APPLE)` 分支改用 `-Wl,-dead_strip`，其他平台不变 |
+| Vulkan 链接 | CLI 与三个封装库 `find_package(Vulkan)` | **实测：** 默认会找到 vulkan-loader，而 MoltenVK 对 loader 来说是 portability 驱动，`vulkan_utils.cpp` 创建实例时没声明 `VK_KHR_portability_enumeration`，`-l` 报 "Failed to create Vulkan instance"。`build-core.sh` 改为 `-DVulkan_LIBRARY=<molten-vk>/lib/libMoltenVK.dylib`，与 Homebrew 的 ncnn 一样直接链 MoltenVK，进程内只有一套 Vulkan 实现，打包也不用带 loader 和 ICD 清单 |
 | `CMakeLists.txt:22-24` | spdlog/Boost 在 Windows 构建脚本里用源码（`=OFF`） | Mac 用 `=ON` + Homebrew `spdlog`（会带上 `fmt`）、`boost`（CLI 用 program_options） |
 | `CMakeLists.txt:113-115, 273-` | `add_subdirectory(third_party/lib*_ncnn_vulkan/src)` | 这三个库的源码不在 git 里（`third_party/` 整个被 .gitignore），迁移包里有锁定提交的 git bundle，见 03-setup.md |
-| `src/fsutils.cpp`、`include/libvideo2x/fsutils.h`、`tools/video2x/src/argparse.cpp`、`tools/video2x/src/video2x.cpp`（`wmain`、`SetConsoleOutputCP` 等） | `_WIN32` 宽字符路径与控制台 | 已有完整的非 Windows 分支（上游 Linux 在用），预计不用改，编译验证即可 |
+| `src/fsutils.cpp`、`include/libvideo2x/fsutils.h`、`tools/video2x/src/argparse.cpp`、`tools/video2x/src/video2x.cpp`（`wmain`、`SetConsoleOutputCP` 等） | `_WIN32` 宽字符路径与控制台 | 已有完整的非 Windows 分支（上游 Linux 在用），编译通过。**实测例外：** `fsutils.cpp` 的 `get_executable_directory()` 非 Windows 分支读 `/proc/self/exe`，macOS 没有 `/proc`，每次运行打 4 行 `[error]`，"在可执行文件旁找资源"这条兜底也失效。已加 `__APPLE__` 分支用 `_NSGetExecutablePath` |
 | `src/libplacebo.cpp:113` | `_WIN32` 下把 `\` 换成 `/` | 不用改 |
 | `tools/video2x/src/vulkan_utils.cpp` | `-l` 枚举 Vulkan 设备 | MoltenVK 下 Apple GPU 一般报 “Integrated GPU”。bridge 的自动选卡"独显优先，否则 0 号"在 Mac 上自然落到 0 号，不用改 |
 

@@ -91,9 +91,12 @@ npm config set registry https://registry.npmmirror.com      # 国内可选
 export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
 export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
 npm ci
+node node_modules/electron/install.js   # Electron 43 起 npm ci 不再下载本体，要显式下载（带上面的镜像变量）
 ```
 
-Windows 端当时用 Node 24.14、npm 11.11。vite 7 要求 Node ≥ 20.19。
+Windows 端当时用 Node 24.14、npm 11.11。vite 7 要求 Node ≥ 20.19。Mac 上实测 Homebrew 的 Node 26.11 / npm 11.20 可用。
+
+npm 11.20 会提示 `electron-winstaller`、`esbuild`、`fsevents` 的安装脚本"not yet covered by allowScripts"而跳过。实测不影响开发：esbuild 的平台二进制由可选依赖直接提供，`electron-winstaller` 只用于 Windows 打包。
 
 ## 5. 权重与模型放置
 
@@ -132,4 +135,11 @@ bash scripts/macos/doctor.sh
 bash scripts/macos/build-core.sh        # 产物：build-macos/video2x、build-macos/libvideo2x.dylib
 ```
 
-第一次编译**预计会失败**在 `target_clones` 上（见 02 文档 A 节第一行），这正是阶段 1 的第一项工作。
+在 M5 Max 上全量编译约 5 秒。第一次在 Mac 上编译时遇到并已修复的问题（`target_clones` 只报警告，并不会失败）：
+
+- Homebrew ncnn 依赖 OpenMP：`build-core.sh` 传 `OpenMP_ROOT` 与 `CMP0074`
+- GNU ld 链接参数：`CMakeLists.txt` 加 `APPLE` 分支
+- keg-only 的 ffmpeg@7 链接不到：改用 `_LINK_LIBRARIES`
+- `-l` 创建 Vulkan 实例失败：直接链接 MoltenVK
+
+详见 02 文档 A 节的"实测"说明。
