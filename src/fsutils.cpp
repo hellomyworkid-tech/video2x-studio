@@ -8,6 +8,11 @@
 #include <cstring>
 #endif
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <vector>
+#endif
+
 #include <spdlog/spdlog.h>
 
 #include "logger_manager.h"
@@ -38,6 +43,27 @@ static std::filesystem::path get_executable_directory() {
 
     // Create a std::filesystem::path from the filepath and return its parent path
     std::filesystem::path execpath(filepath.data());
+    return execpath.parent_path();
+}
+#elif defined(__APPLE__)
+static std::filesystem::path get_executable_directory() {
+    // macOS has no /proc; _NSGetExecutablePath may return a path through symlinks,
+    // so canonicalize it to match what /proc/self/exe yields on Linux
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> filepath(size);
+    if (_NSGetExecutablePath(filepath.data(), &size) != 0) {
+        logger()->error("Error getting executable path");
+        return std::filesystem::path();
+    }
+
+    std::error_code ec;
+    std::filesystem::path execpath = std::filesystem::canonical(filepath.data(), ec);
+    if (ec) {
+        logger()->error("Error resolving executable path: {}", ec.message());
+        return std::filesystem::path();
+    }
+
     return execpath.parent_path();
 }
 #else   // _WIN32

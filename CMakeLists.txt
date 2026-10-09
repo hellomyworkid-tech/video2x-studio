@@ -41,7 +41,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         add_link_options(/LTCG /OPT:REF /OPT:ICF)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         add_compile_options(-O3 -ffunction-sections -fdata-sections)
-        add_link_options(-Wl,-s -flto -Wl,--gc-sections)
+        if(APPLE)
+            # ld64 has no --gc-sections (-dead_strip is its equivalent) and -s is obsolete
+            add_link_options(-flto -Wl,-dead_strip)
+        else()
+            add_link_options(-Wl,-s -flto -Wl,--gc-sections)
+        endif()
     endif()
 endif()
 
@@ -151,19 +156,21 @@ else()
     pkg_check_modules(libswscale REQUIRED libswscale)
 
     # Apply include directories and libraries directly to the target
+    # (_LINK_LIBRARIES are full paths, so FFmpeg outside the default linker search path,
+    # e.g. keg-only Homebrew ffmpeg@7 on macOS, links without extra -L flags)
     target_include_directories(libvideo2x SYSTEM PRIVATE
         ${libavcodec_INCLUDE_DIRS}
-        ${libavfilter_LIBRARIES}
+        ${libavfilter_INCLUDE_DIRS}
         ${libavformat_INCLUDE_DIRS}
         ${libavutil_INCLUDE_DIRS}
         ${libswscale_INCLUDE_DIRS}
     )
     target_link_libraries(libvideo2x PRIVATE
-        ${libavcodec_LIBRARIES}
-        ${libavfilter_LIBRARIES}
-        ${libavformat_LIBRARIES}
-        ${libavutil_LIBRARIES}
-        ${libswscale_LIBRARIES}
+        ${libavcodec_LINK_LIBRARIES}
+        ${libavfilter_LINK_LIBRARIES}
+        ${libavformat_LINK_LIBRARIES}
+        ${libavutil_LINK_LIBRARIES}
+        ${libswscale_LINK_LIBRARIES}
     )
 endif()
 
@@ -443,7 +450,7 @@ if(VIDEO2X_BUILD_CLI)
             ${libavcodec_INCLUDE_DIRS}
             ${libavutil_INCLUDE_DIRS}
         )
-        target_link_libraries(video2x PRIVATE ${libavcodec_LIBRARIES} ${libavutil_LIBRARIES})
+        target_link_libraries(video2x PRIVATE ${libavcodec_LINK_LIBRARIES} ${libavutil_LINK_LIBRARIES})
     endif()
 
     # spdlog
