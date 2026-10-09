@@ -616,7 +616,8 @@ def main(args):
     list_file = out_path + '.mergelist.txt'
     with open(list_file, 'w', encoding='utf-8') as lf:
         for p in expected:
-            lf.write("file '" + p.replace('\\', '/').replace("'", "'\\''") + "'\n")
+            # concat 按清单文件所在目录解析相对路径：-o 传相对路径时会拼成 dir/dir/...，统一写绝对路径
+            lf.write("file '" + os.path.abspath(p).replace('\\', '/').replace("'", "'\\''") + "'\n")
     m = merge_with_source(list_file, args.input, out_path, meta, args,
                           lambda msg: print(f'[worker] {msg}', flush=True))
     if m.returncode != 0:
