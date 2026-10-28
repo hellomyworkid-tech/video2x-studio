@@ -4,6 +4,7 @@ import type {
     AssetsState, GpuDevice, InstallStatus, Job, JobRequest, PrecheckResponse, PythonEngineStatus,
 } from '@/types';
 import { buildArgsForFile, buildOutputPath, buildPythonArgs, engineFor } from '@/lib/args';
+import type { HostFeatures } from '@/lib/platform';
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     const res = await fetch(url, init);
@@ -17,19 +18,26 @@ export const api = {
         ok: boolean; cliPath: string; cliExists: boolean;
         pythonEngine: PythonEngineStatus;
         install?: InstallStatus;
+        /** 旧版 bridge 无以下两项 */
+        platform?: string;
+        features?: Partial<HostFeatures>;
     }>('/api/health'),
 
     devices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/devices'),
 
-    // CUDA 设备枚举（旗舰引擎专用）：编号空间与 Vulkan 相互独立，不可混用
-    cudaDevices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/cuda-devices'),
+    // PyTorch 设备枚举（旗舰引擎专用）：CUDA 编号空间与 Vulkan 相互独立，不可混用；Mac 上为唯一的 MPS 设备
+    torchDevices: () => jsonFetch<{ devices: GpuDevice[] }>('/api/torch-devices'),
 
-    browse: (kind: 'open' | 'save' | 'dir') =>
-        jsonFetch<{ files: string[] }>('/api/browse', {
+    // Electron（macOS）用主进程的原生对话框；浏览器开发模式与 Windows 走 bridge 的对话框
+    browse: async (kind: 'open' | 'save' | 'dir') => {
+        const native = window.v2xElectron?.showDialog;
+        if (native) return { files: await native(kind) };
+        return jsonFetch<{ files: string[] }>('/api/browse', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ kind }),
-        }),
+        });
+    },
 
     jobs: () => jsonFetch<{ jobs: Job[] }>('/api/jobs'),
 

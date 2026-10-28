@@ -1,5 +1,6 @@
 import { Cpu } from 'lucide-react';
-import { HWACCELS, LOG_LEVELS } from '@/lib/args';
+import { LOG_LEVELS, hwaccelOptions } from '@/lib/args';
+import { isMac } from '@/lib/platform';
 import type { GpuDevice, JobRequest } from '@/types';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,6 +28,28 @@ function gpuKind(type?: string): string {
 export default function AdvancedSection({ req, onChange, devices, python, bare }: Props) {
     const adv = req.advanced;
     const setAdv = (patch: Partial<typeof adv>) => onChange({ advanced: { ...adv, ...patch } });
+
+    if (python && isMac()) {
+        // Mac：只有一个 Apple GPU，旗舰引擎固定走 MPS（worker.py --device mps），没有可选项
+        const gpu = devices[0];
+        return (
+            <SectionCard step="05" title="高级" desc="旗舰引擎硬件调度" bare={bare}>
+                <div className="max-w-sm">
+                    <Label className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Cpu className="h-3 w-3" /> GPU
+                    </Label>
+                    <div className="flex h-9 items-center rounded-md border border-border/60 bg-input/40 px-3 text-xs">
+                        {gpu ? `${gpu.name} · Apple GPU（MPS）` : 'Apple GPU（MPS）'}
+                    </div>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
+                    {gpu?.vramGb
+                        ? `统一内存 ${gpu.memGb ?? '?'} GB，其中 GPU 最多可用约 ${gpu.vramGb} GB（PyTorch 的上限）。超出时程序会自动减小分段重试，不会转为换页。`
+                        : '旗舰引擎在 Apple GPU 上推理。首次检测约需 10 秒（加载 PyTorch）。'}
+                </p>
+            </SectionCard>
+        );
+    }
 
     if (python) {
         // 旗舰引擎（PyTorch）：CUDA 与 Vulkan 是两套独立编号空间，
@@ -83,7 +106,7 @@ export default function AdvancedSection({ req, onChange, devices, python, bare }
                     <Select value={adv.hwaccel} onValueChange={(v) => setAdv({ hwaccel: v })}>
                         <SelectTrigger className="h-9 bg-input/60 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                            {HWACCELS.map((h) => <SelectItem key={h.value} value={h.value} className="text-xs">{h.label}</SelectItem>)}
+                            {hwaccelOptions().map((h) => <SelectItem key={h.value} value={h.value} className="text-xs">{h.label}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>

@@ -3,6 +3,7 @@ import {
     capsFor, CUGAN_NOISE_LABELS, normalizeProcessor, recommendedCrf,
     REALCUGAN_MODELS, REALESRGAN_MODELS, RIFE_MODELS, SHADERS, SPAN_MODELS,
 } from '@/lib/args';
+import { isMac } from '@/lib/platform';
 import type { JobRequest, ProcessorKind } from '@/types';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,8 @@ interface Props {
     req: JobRequest;
     onChange: (p: Partial<JobRequest>) => void;
     bare?: boolean;
+    /** 本机不可用的处理器 → 原因（卡片置灰，悬停显示原因） */
+    unavailable?: Partial<Record<ProcessorKind, string>>;
 }
 
 const PROCESSORS: {
@@ -36,13 +39,18 @@ const PROCESSORS: {
     { kind: 'swiftvr', name: 'SwiftVR', tagline: '重建档 · 生成式修复 · 比 SeedVR2 快约 15 倍 · 需 16GB 显存', icon: Rocket, accent: 'from-sky-500/20 to-sky-500/5', engine: 'pytorch' },
 ];
 
+// Mac 上与 Windows 不同的卡片提示（显存口径换成统一内存）
+const MAC_TAGLINES: Partial<Record<ProcessorKind, string>> = {
+    swiftvr: '重建档 · 生成式修复 · 需 24GB 以上统一内存',
+};
+
 const RES_PRESETS = [
     { label: '1080p', w: 1920, h: 1080 },
     { label: '1440p', w: 2560, h: 1440 },
     { label: '4K', w: 3840, h: 2160 },
 ];
 
-export default function ProcessorSection({ req, onChange, bare }: Props) {
+export default function ProcessorSection({ req, onChange, bare, unavailable = {} }: Props) {
     const p = req.processor;
     const setP = (patch: Partial<typeof p>) => {
         const merged = { ...p, ...patch };
@@ -81,22 +89,30 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
             <div className="mb-3 grid grid-cols-9 gap-1.5">
                 {PROCESSORS.map((proc) => {
                     const active = p.kind === proc.kind;
+                    const blocked = unavailable[proc.kind];
+                    const tagline = (isMac() && MAC_TAGLINES[proc.kind]) || proc.tagline;
                     return (
                         <button
                             key={proc.kind}
-                            onClick={() => pickProcessor(proc.kind)}
-                            title={proc.tagline}
+                            onClick={() => !blocked && pickProcessor(proc.kind)}
+                            title={blocked ? `${proc.name} 暂不可用：${blocked}` : tagline}
+                            aria-disabled={!!blocked}
                             className={cn(
                                 'group relative flex flex-col items-center gap-1 rounded-lg border bg-gradient-to-b px-1.5 py-2.5 text-center transition-all duration-200',
                                 proc.accent,
                                 active
                                     ? 'border-cyan-400/60 shadow-[0_0_0_1px_hsl(187_92%_55%/0.3),0_6px_20px_-6px_hsl(187_92%_45%/0.3)]'
-                                    : 'border-border/70 hover:border-border hover:bg-secondary/40'
+                                    : 'border-border/70 hover:border-border hover:bg-secondary/40',
+                                blocked && !active && 'cursor-not-allowed opacity-35 hover:border-border/70 hover:bg-transparent'
                             )}
                         >
                             <proc.icon className={cn('h-4.5 w-4.5 h-[18px] w-[18px]', active ? 'text-cyan-300' : 'text-muted-foreground')} />
                             <span className={cn('text-[11px] font-bold leading-tight', active && 'text-cyan-200')}>{proc.name}</span>
-                            {proc.engine === 'pytorch' && (
+                            {blocked ? (
+                                <span className="whitespace-nowrap rounded bg-secondary px-1 py-px text-[8.5px] font-semibold leading-tight text-muted-foreground">
+                                    暂不可用
+                                </span>
+                            ) : proc.engine === 'pytorch' && (
                                 <span className="whitespace-nowrap rounded bg-amber-500/15 px-1 py-px text-[8.5px] font-semibold leading-tight text-amber-300/90">
                                     {/* SeedVR2 / SwiftVR 是目标分辨率模式，不是固定 ×4 */}
                                     {proc.kind === 'realbasicvsr' ? 'PyTorch ×4' : 'PyTorch 可调尺寸'}
@@ -383,22 +399,27 @@ export default function ProcessorSection({ req, onChange, bare }: Props) {
                             </Select>
                         </div>
                         <div className="flex h-9 items-center rounded-md border border-border/60 bg-secondary/30 px-3 text-[11px] text-muted-foreground">
-                            需 16GB 级显存 · FP8 权重约 5GB 常驻 · 断点续跑 · 显存不足自动减小分段重试
+                            {isMac()
+                                ? '需约 24GB 以上统一内存 · bf16 权重约 9.4GB 常驻 · 断点续跑 · 内存不足自动减小分段重试'
+                                : '需 16GB 级显存 · FP8 权重约 5GB 常驻 · 断点续跑 · 显存不足自动减小分段重试'}
                         </div>
                     </div>
                 )}
 
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
                     {p.kind === 'lanczos' && '纯 Lanczos 重采样，不含任何神经网络：不占显存、绝不产生伪影或"塑料感"。对高码率清晰源（如 8 Mbps 以上的现代 H.264/HEVC），逐像素保真度反而高于 Real-ESRGAN 系列——源没丢细节时 AI 的"脑补"只会偏离原貌。但保真高不等于好看：想要更清晰的观感，仍应试试 Real-ESRGAN。'}
-                    {p.kind === 'lanczos' && ' 缩放本身的耗时可忽略（1383 帧加不加 Lanczos 都是 2 秒），因此无需 GPU 加速——实测走 CUDA 硬解+scale_cuda 的全 GPU 链路反而更慢。真正的瓶颈是编码器，占总耗时约 90%：换成 hevc_nvenc 可直接快一倍（详见「编码器」标签页）。'}
+                    {p.kind === 'lanczos' && !isMac() && ' 缩放本身的耗时可忽略（1383 帧加不加 Lanczos 都是 2 秒），因此无需 GPU 加速——实测走 CUDA 硬解+scale_cuda 的全 GPU 链路反而更慢。真正的瓶颈是编码器，占总耗时约 90%：换成 hevc_nvenc 可直接快一倍（详见「编码器」标签页）。'}
+                    {p.kind === 'lanczos' && isMac() && ' 缩放本身的耗时可忽略，真正的瓶颈是编码器。M5 Max 上 libx264 本身已经很快（2560×1440 约 100 fps）；hevc_videotoolbox 硬编更快，但同画质下体积要大三成左右（详见「编码器」标签页）。'}
                     {p.kind === 'libplacebo' && 'libplacebo 需要显式指定输出分辨率；Anime4K 系列着色器对动漫/动画内容效果最好，速度极快。'}
                     {p.kind === 'realesrgan' && 'realesr-animevideov3 支持 2/3/4×，为动漫视频训练；realesrgan-plus / nomos8k / realwebphoto 仅 4×；realesr-generalv3 仅 4× 但可启用 WDN 降噪变体；nomos8k-compact 仅 2×。缩放选项已按模型实际权重锁定。注意：这些模型均为 GAN 训练，会"再生"细节——源越糊收益越大，代价是不再逐像素忠实于原图，但观感往往更清晰锐利（实拍素材上 nomos8k-compact 与 animevideov3 的发丝/纹理重建明显优于 SPAN）。哪个更合眼缘因片源而异，建议实拍先试 nomos8k-compact，动漫用 animevideov3。'}
                     {p.kind === 'realcugan' && 'models-se 综合最佳（2× 时另有 1x/2x 精细降噪档）；models-pro 仅 2/3×；models-nose 仅 2× 且固定不降噪。降噪档位随 模型+倍率 联动。为动漫内容设计，真人素材建议改用 SPAN。2K 以上输出显存占用较高。'}
                     {p.kind === 'rife' && '补帧不改变分辨率；场景切换阈值越低检测越敏感（20 表示 20% 差异即判定切换），避免转场处产生伪影。可与 HDR 同用。'}
                     {p.kind === 'span' && 'SPAN 仅支持 2× / 4×，模型体积最小、速度快（720p 输入实测约 12 fps）。它是效率竞赛（NTIRE）出身的保真型模型：只做忠实放大、几乎不"再生"细节，因此不会有塑料感与振铃，但观感也偏软——头发、织物等高频区域可能糊成块状。合成退化的保真度测试里它得分最高，但那类测试恰好偏袒它这种训练方式；真实素材上不少人觉得不如 Real-ESRGAN 好看。建议在自己的片段上和 Real-ESRGAN 对比后再定。'}
                     {p.kind === 'realbasicvsr' && 'RealBasicVSR（Apache-2.0）通过双向循环传播 + SPyNet 光流对齐消除帧间闪烁，时序一致性好。但代价很高：720×1280 输入端到端实测约 1.4 fps，约为 Real-ESRGAN 4× 的 1/6、SPAN 2× 的 1/8。显存够时走整帧推理（画质最佳）；输入过大放不下会自动退化为空间分块，实测画质再降约 1.6 dB。仅在源确有明显退化（低码率、噪点、糊）时才值得；清晰源上收益很小。由独立 PyTorch 后端执行，编码器、CRF、码率、像素格式可调。'}
-                    {p.kind === 'swiftvr' && 'SwiftVR（2026 年 6 月开源，Apache-2.0，Wan2.2-5B 底座）单步流式生成式视频修复。RTX 5070 Ti 实测：720p → 2560×1440 稳态约 7 fps，约为 SeedVR2 的近 30 倍、不到 nomos8k-compact 的一半（RTX 40/50 系矩阵乘走 FP8 张量核；更早的显卡自动回退 bf16 计算，会慢一些）；静止背景的帧间稳定性在 AI 方法中最好（接近 Lanczos），实测也没有出现 SeedVR2 那样改变脸型的问题。生成式模型会补出原片没有的细节（发茬、皮肤纹理、发丝），强退化素材收益最大；清晰源上可能"补"得过头。需要 16GB 级显存：权重 FP8 量化后约 5GB 常驻。权重量化、FP8 张量核计算各自带来的输出差异都在 PSNR≈50dB，远小于编码损失，肉眼不可辨。'}
+                    {p.kind === 'swiftvr' && isMac() && 'SwiftVR（2026 年 6 月开源，Apache-2.0，Wan2.2-5B 底座）单步流式生成式视频修复。M5 Max（36 GB）实测：720p → 2560×1440 稳态约 3 fps，960p 输出约 7 fps，约为 RTX 5070 Ti 的 40%～45%（Mac 没有 FP8 计算，权重以 bf16 常驻约 9.4 GB；画质与 Windows 输出一致）。2K 输出时内存峰值约 26～29 GB，渲染期间尽量少开其他大程序。静止背景的帧间稳定性在 AI 方法中最好（接近 Lanczos）。生成式模型会补出原片没有的细节（发茬、皮肤纹理、发丝），强退化素材收益最大；清晰源上可能"补"得过头。'}
+                    {p.kind === 'swiftvr' && !isMac() && 'SwiftVR（2026 年 6 月开源，Apache-2.0，Wan2.2-5B 底座）单步流式生成式视频修复。RTX 5070 Ti 实测：720p → 2560×1440 稳态约 7 fps，约为 SeedVR2 的近 30 倍、不到 nomos8k-compact 的一半（RTX 40/50 系矩阵乘走 FP8 张量核；更早的显卡自动回退 bf16 计算，会慢一些）；静止背景的帧间稳定性在 AI 方法中最好（接近 Lanczos），实测也没有出现 SeedVR2 那样改变脸型的问题。生成式模型会补出原片没有的细节（发茬、皮肤纹理、发丝），强退化素材收益最大；清晰源上可能"补"得过头。需要 16GB 级显存：权重 FP8 量化后约 5GB 常驻。权重量化、FP8 张量核计算各自带来的输出差异都在 PSNR≈50dB，远小于编码损失，肉眼不可辨。'}
                     {p.kind === 'seedvr2' && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度最慢：RTX 5070 Ti 实测 2560×1440 输出约 0.25 fps，支持断点续跑可分多次完成；实测在部分人脸上会改变脸型；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
+                    {isMac() && ['realesrgan', 'realcugan', 'span', 'rife'].includes(p.kind) && ' 以上速度为 RTX 5070 Ti 实测；M5 Max 上 NCNN 引擎约慢一倍（经 MoltenVK 运行，没有张量核加速；854×480 放大 2 倍稳态约 13 fps）。'}
                 </p>
                 {(p.kind === 'realbasicvsr' || p.kind === 'seedvr2' || p.kind === 'swiftvr') && (
                     <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-200/90">

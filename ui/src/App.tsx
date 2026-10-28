@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AssetsState, GpuDevice, InstallStatus, Job, PythonEngineStatus } from '@/types';
 import { api, subscribeAssets, subscribeJobs, withDownloadSpeed } from '@/lib/api';
+import { setHost } from '@/lib/platform';
 import TitleBar from '@/sections/TitleBar';
 import NavRail from '@/sections/NavRail';
 import StatusBar from '@/sections/StatusBar';
@@ -26,14 +27,16 @@ export default function App() {
         const unsubAssets = subscribeAssets((next) => setAssetState((prev) => withDownloadSpeed(prev, next)));
         api.health()
             .then((h) => {
+                // 先登记平台与能力，紧接着的 setState 触发的重渲染即可读到
+                setHost(h.platform, h.features);
                 setCliReady(h.cliExists);
                 setPyEngine(h.pythonEngine ?? null);
                 setInstall(h.install ?? null);
             })
             .catch(() => setCliReady(false));
         api.devices().then((d) => setDevices(d.devices)).catch(() => {});
-        // CUDA 枚举首次约 10s（torch import），后台异步填充，不阻塞界面
-        api.cudaDevices().then((d) => setCudaDevices(d.devices)).catch(() => {});
+        // PyTorch 设备枚举首次约 10s（torch import），后台异步填充，不阻塞界面
+        api.torchDevices().then((d) => setCudaDevices(d.devices)).catch(() => {});
         api.assets().then(setAssetState).catch(() => {});
         // 全局拖放防护：拖到非投放区时阻止窗口直接打开文件
         const prevent = (e: DragEvent) => e.preventDefault();

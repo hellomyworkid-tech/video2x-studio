@@ -1,4 +1,5 @@
 import { Droplets, Sun, Video } from 'lucide-react';
+import { hostFeatures } from '@/lib/platform';
 import type { JobRequest } from '@/types';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
@@ -17,6 +18,8 @@ interface Props {
 export default function EnhanceSection({ req, onChange, bare }: Props) {
     const e = req.enhance;
     const setE = (patch: Partial<typeof e>) => onChange({ enhance: { ...e, ...patch } });
+    // SDR 转 HDR 依赖 FFmpeg 的 libplacebo 滤镜（Homebrew 的 ffmpeg@7 没有）
+    const hdrAvailable = hostFeatures().libplacebo;
 
     return (
         <SectionCard step="03" title="画质增强" desc="可选增强级——防抖、降噪、SDR 转 HDR，按需叠加" bare={bare}>
@@ -78,10 +81,11 @@ export default function EnhanceSection({ req, onChange, bare }: Props) {
                 <EnhCard
                     icon={<Sun className="h-[18px] w-[18px]" />}
                     title="SDR 转 HDR"
-                    desc="逆色调映射 · 10bit"
+                    desc={hdrAvailable ? '逆色调映射 · 10bit' : '当前 FFmpeg 不含 libplacebo，暂不可用'}
                     enabled={e.hdr}
                     onToggle={(v) => setE({ hdr: v })}
                     activeAccent="border-amber-400/50"
+                    disabled={!hdrAvailable && !e.hdr}
                 >
                     <div>
                         <Label className="mb-1.5 block text-[11px] text-muted-foreground">转换曲线</Label>
@@ -115,7 +119,7 @@ export default function EnhanceSection({ req, onChange, bare }: Props) {
 }
 
 function EnhCard({
-    icon, title, desc, enabled, onToggle, children, activeAccent,
+    icon, title, desc, enabled, onToggle, children, activeAccent, disabled,
 }: {
     icon: React.ReactNode;
     title: string;
@@ -124,6 +128,8 @@ function EnhCard({
     onToggle: (v: boolean) => void;
     children: React.ReactNode;
     activeAccent: string;
+    /** 本机不支持：开关置灰（已开启的仍允许关掉） */
+    disabled?: boolean;
 }) {
     return (
         <div
@@ -142,7 +148,7 @@ function EnhCard({
                         <div className="text-[10px] text-muted-foreground">{desc}</div>
                     </div>
                 </div>
-                <Switch checked={enabled} onCheckedChange={onToggle} />
+                <Switch checked={enabled} onCheckedChange={onToggle} disabled={disabled} />
             </div>
             <div className={cn(!enabled && 'pointer-events-none saturate-50')}>{children}</div>
         </div>

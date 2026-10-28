@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, FolderOpen, History, Info, Loader2, Rocket, RotateCcw, ShieldAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { buildArgsForFile, buildOutputPath, buildPythonArgs, defaultJobRequest, engineFor } from '@/lib/args';
-import type { GpuDevice, InstallStatus, JobRequest, PrecheckWarning, PythonEngineStatus } from '@/types';
+import { buildArgsForFile, buildOutputPath, buildPythonArgs, defaultJobRequest, engineFor, PYTHON_PROCESSORS } from '@/lib/args';
+import { hostFeatures, isMac } from '@/lib/platform';
+import type { GpuDevice, InstallStatus, JobRequest, PrecheckWarning, ProcessorKind, PythonEngineStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -97,7 +98,7 @@ function summarizeConfig(req: JobRequest): string {
 
     const isPy = engineFor(req.processor.kind) === 'python';
     const adv = isPy
-        ? [`CUDA 设备${req.advanced.cudaDeviceIndex ?? 0}`]
+        ? [isMac() ? 'Apple GPU' : `CUDA 设备${req.advanced.cudaDeviceIndex ?? 0}`]
         : [req.advanced.deviceIndex < 0 ? '自动选卡' : `设备${req.advanced.deviceIndex}`];
     if (!isPy && req.advanced.hwaccel && req.advanced.hwaccel !== 'none') adv.push(`硬解 ${req.advanced.hwaccel}`);
     parts.push(`高级：${adv.join(' · ')}`);
@@ -126,8 +127,18 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, py
     const kindWeights: Partial<Record<string, boolean | undefined>> = {
         realbasicvsr: pyEngine?.realbasicvsrWeights, seedvr2: pyEngine?.seedvr2Weights, swiftvr: pyEngine?.swiftvrWeights,
     };
+    // 本平台尚未完成移植的旗舰引擎（bridge 未报告时视为全部支持）
+    const kindPorted = !isPython || !pyEngine?.supported || pyEngine.supported.includes(req.processor.kind);
     const pyKindReady = pyReady && kindWeights[req.processor.kind] !== false;
-    const engineOk = isPython ? pyKindReady : cliReady;
+    const engineOk = isPython ? kindPorted && pyKindReady : cliReady;
+    // Anime4K 与 SDR 转 HDR 依赖 FFmpeg 的 libplacebo 滤镜
+    const needsLibplacebo = req.processor.kind === 'libplacebo' || (!isPython && req.enhance.hdr);
+    // 本机不可用的处理器（卡片置灰并说明原因）
+    const unavailable: Partial<Record<ProcessorKind, string>> = {};
+    if (!hostFeatures().libplacebo) unavailable.libplacebo = '需要带 libplacebo 的 FFmpeg，当前环境不支持';
+    for (const k of PYTHON_PROCESSORS) {
+        if (pyEngine?.supported && !pyEngine.supported.includes(k)) unavailable[k] = 'Mac 版尚未完成移植';
+    }
 
     // 不可提交的原因（按优先级取第一条）：按钮变灰时必须告诉用户为什么——
     // 程序文件不完整的机器上，此前只有一个灰按钮，用户无从判断问题出在哪
@@ -135,10 +146,16 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, py
         if (install && !install.complete) {
             return `程序文件不完整（缺少 ${install.missing[0]}${install.missing.length > 1 ? ` 等 ${install.missing.length} 项` : ''}），请重新完整复制程序文件夹`;
         }
+        if (!kindPorted) {
+            return `${PROCESSOR_NAMES[req.processor.kind] ?? req.processor.kind} 在 Mac 上尚未完成移植，暂不可用；可先用 SwiftVR 或 NCNN 引擎`;
+        }
         if (!engineOk) {
             return isPython
                 ? `${PROCESSOR_NAMES[req.processor.kind] ?? req.processor.kind} 未就绪：缺少 Python 运行时或该引擎的模型权重（见队列页顶部提示）`
-                : 'ncnn 引擎未就绪：找不到 video2x.exe';
+                : 'ncnn 引擎未就绪：找不到 video2x 程序';
+        }
+        if (needsLibplacebo && !hostFeatures().libplacebo) {
+            return 'Anime4K（libplacebo）与 SDR 转 HDR 需要带 libplacebo 的 FFmpeg，当前环境不支持';
         }
         if (req.files.length === 0 && !req.outputDir.trim()) return '请先添加视频文件并选择输出目录';
         if (req.files.length === 0) return '请先添加视频文件';
@@ -151,7 +168,8 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, py
     })();
     const canSubmit = blockReason === null;
     // 环境问题（程序文件 / 引擎）醒目提示；"还没选文件"之类的常规引导保持低调
-    const blockIsFault = (install !== null && !install.complete) || !engineOk;
+    const blockIsFault = (install !== null && !install.complete) || !engineOk
+        || (needsLibplacebo && !hostFeatures().libplacebo);
 
     const previewCmd = useMemo(() => {
         if (req.files.length === 0 || !req.outputDir.trim()) return null;
@@ -304,7 +322,7 @@ export default function NewJobView({ devices, cudaDevices, cliReady, pyReady, py
                             ))}
                         </div>
                         <div className="p-4">
-                            {tab === 'processor' && <ProcessorSection req={req} onChange={patch} bare />}
+                            {tab === 'processor' && <ProcessorSection req={req} onChange={patch} bare unavailable={unavailable} />}
                             {tab === 'enhance' &&
                                 (isPython ? (
                                     <NotApplicableCard

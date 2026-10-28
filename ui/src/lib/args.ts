@@ -2,6 +2,7 @@
 // Kept strictly in sync with tools/video2x (see video2x.exe --help).
 
 import type { EngineKind, JobRequest, ProcessorKind } from '@/types';
+import { isMac } from '@/lib/platform';
 
 export const PYTHON_PROCESSORS: ProcessorKind[] = ['realbasicvsr', 'seedvr2', 'swiftvr'];
 
@@ -18,8 +19,8 @@ export function buildPythonArgs(req: JobRequest, inputPath: string, outputPath: 
     const args = ['--model', p.kind, '-i', inputPath, '-o', outputPath,
         '--codec', codec, '--crf', String(enc.crf >= 0 ? enc.crf : 18),
         // 旗舰引擎用 CUDA 编号空间（不可复用 Vulkan 的 deviceIndex，核显机上会错位）；
-        // 旧持久化配置无此字段时回落 0
-        '--device', `cuda:${req.advanced.cudaDeviceIndex ?? 0}`];
+        // 旧持久化配置无此字段时回落 0。Mac 只有一个 Apple GPU，走 MPS
+        '--device', isMac() ? 'mps' : `cuda:${req.advanced.cudaDeviceIndex ?? 0}`];
     // 码率 > 0 时 worker 端切到码率控制并忽略 --crf（与 CLI 链路同一规则，见 buildArgsForFile）
     if (enc.bitRate > 0) args.push('--bit-rate', String(enc.bitRate));
     if (enc.pixFmt) args.push('--pix-fmt', enc.pixFmt);
@@ -134,14 +135,27 @@ export function buildArgsForFile(req: JobRequest, inputPath: string, outputPath:
  *   cq                  —— *_nvenc（N 卡硬编）
  *   qvbr_quality_level  —— *_amf（A 卡硬编），且需同时把 rc 切到 qvbr 才生效
  * 数值刻度三者接近（均 0–51，越小越好），可直接沿用同一个数字。
+ *   flags + global_quality —— *_videotoolbox（Mac 硬编）：恒定质量只能经通用选项开启
+ *                             （等价于 ffmpeg 的 -q:v），刻度相反，按 vtQuality 换算
  */
 export function qualityOpts(codec: string, crf: number): [string, string][] {
     if (crf < 0 || !codec) return [];
     const q = String(crf);
     if (/_nvenc$/.test(codec)) return [['cq', q]];
     if (/_amf$/.test(codec)) return [['rc', 'qvbr'], ['qvbr_quality_level', q]];
+    // global_quality 以 lambda 为单位：质量值 × FF_QP2LAMBDA（118）
+    if (/_videotoolbox$/.test(codec)) return [['flags', '+qscale'], ['global_quality', String(vtQuality(crf) * 118)]];
     // 其余（含自定义编码器）沿用 crf：x264/x265/AV1/VP9 系列都用它
     return [['crf', q]];
+}
+
+/**
+ * x264 的 CRF → VideoToolbox 的质量值（0–100，越大越清晰）。与 worker.py 的 vt_quality 同一公式。
+ * M5 Max 实测标定（Lanczos ×2 到 2560×1440，240 帧，按 Y-PSNR 相等对齐）：CRF 16/18/20/23/26/28
+ * 分别对应 q≈82/79/75/68/63/58，h264 与 hevc 两个编码器几乎相同，拟合为 115 - 2×CRF。
+ */
+export function vtQuality(crf: number): number {
+    return Math.max(1, Math.min(100, Math.round(115 - 2 * crf)));
 }
 
 /**
@@ -187,7 +201,9 @@ export function buildOutputPath(req: JobRequest, inputPath: string): string {
         .replaceAll('{proc}', procTag(req.processor))
         .replaceAll('{ext}', req.container);
     const dir = req.outputDir.replace(/[\\/]+$/, '');
-    return `${dir}\\${name}`;
+    // 分隔符跟随输出目录的写法：含 / 且不含 \ 时用 /（macOS），否则沿用 Windows 的 \
+    const sep = dir.includes('/') && !dir.includes('\\') ? '/' : '\\';
+    return `${dir}${sep}${name}`;
 }
 
 export function defaultJobRequest(): JobRequest {
@@ -363,6 +379,18 @@ export const CODECS = [
     { value: 'libvpx-vp9', label: 'VP9 (libvpx-vp9)' },
     { value: 'custom', label: '自定义编码器…' },
 ];
+// macOS：没有 N 卡 / A 卡硬编，换成 Apple 的 VideoToolbox；软件编码器同 Windows（Homebrew ffmpeg@7 均带）
+const MAC_CODECS = [
+    { value: 'libx264', label: 'H.264 (libx264) · 兼容优先' },
+    { value: 'libx265', label: 'H.265 (libx265) · 体积优先 / HDR' },
+    { value: 'hevc_videotoolbox', label: 'H.265 苹果硬编 (hevc_videotoolbox) · 最快' },
+    { value: 'h264_videotoolbox', label: 'H.264 苹果硬编 (h264_videotoolbox)' },
+    { value: 'libx264rgb', label: 'H.264 RGB (libx264rgb)' },
+    { value: 'libaom-av1', label: 'AV1 (libaom-av1) · 慢但最省' },
+    { value: 'libvpx-vp9', label: 'VP9 (libvpx-vp9)' },
+    { value: 'custom', label: '自定义编码器…' },
+];
+export const codecOptions = () => (isMac() ? MAC_CODECS : CODECS);
 export const PIX_FMTS = ['', 'yuv420p', 'yuv420p10le', 'yuv444p', 'p010le', 'rgb24'];
 export const HWACCELS = [
     { value: 'none', label: '无（软件解码）· CPU 解码，兼容性最好' },
@@ -371,5 +399,10 @@ export const HWACCELS = [
     { value: 'dxva2', label: 'DXVA2 · 旧接口，仅老系统兼容用' },
     { value: 'qsv', label: 'Intel QSV · Intel 核显专用' },
 ];
+const MAC_HWACCELS = [
+    { value: 'none', label: '无（软件解码）· CPU 解码，兼容性最好' },
+    { value: 'videotoolbox', label: 'VideoToolbox · 苹果硬解，H.264 / HEVC 源可用' },
+];
+export const hwaccelOptions = () => (isMac() ? MAC_HWACCELS : HWACCELS);
 export const CONTAINERS = ['mp4', 'mkv', 'mov', 'avi', 'webm'];
 export const LOG_LEVELS = ['info', 'warn', 'error', 'debug', 'trace'];

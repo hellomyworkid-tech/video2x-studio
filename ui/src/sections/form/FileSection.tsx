@@ -3,6 +3,7 @@ import { FilePlus2, FileVideo, FolderOpen, HardDriveDownload, Import, Loader2, T
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { CONTAINERS } from '@/lib/args';
+import { isMac } from '@/lib/platform';
 import type { JobRequest } from '@/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -185,7 +186,7 @@ export default function FileSection({ req, onChange }: Props) {
                         <Input
                             value={req.outputDir}
                             onChange={(e) => onChange({ outputDir: e.target.value })}
-                            placeholder="D:\Videos\enhanced"
+                            placeholder={isMac() ? '/Users/你的用户名/Movies/enhanced' : 'D:\\Videos\\enhanced'}
                             className="h-9 bg-input/60 text-xs"
                         />
                         <Button variant="outline" size="sm" className="h-9 shrink-0 px-2.5" onClick={() => browse('dir')} disabled={browsing !== null}>

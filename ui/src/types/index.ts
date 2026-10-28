@@ -85,10 +85,12 @@ export interface JobRequest {
 export interface GpuDevice {
     index: number;
     name: string;
-    /** Vulkan 设备类型（Discrete GPU / Integrated GPU…）；CUDA 枚举无此字段 */
+    /** Vulkan 设备类型（Discrete GPU / Integrated GPU…）；CUDA 枚举无此字段，MPS 为 'mps' */
     type?: string;
-    /** CUDA 枚举附带的显存容量（GB） */
+    /** CUDA 枚举附带的显存容量（GB）；MPS 为 PyTorch 在本机可用的上限 */
     vramGb?: number;
+    /** MPS：整机统一内存（GB） */
+    memGb?: number;
 }
 
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'aborted';
@@ -127,6 +129,8 @@ export interface PythonEngineStatus {
     realbasicvsrWeights: boolean;
     seedvr2Weights: boolean;
     swiftvrWeights?: boolean;
+    /** 本平台已完成移植的引擎（旧版 bridge 无此字段：视为全部支持） */
+    supported?: string[];
 }
 
 // ---------------------------------------------------------------------------

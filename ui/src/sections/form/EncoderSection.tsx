@@ -1,5 +1,6 @@
 import { Plus, X } from 'lucide-react';
-import { CODECS, PIX_FMTS } from '@/lib/args';
+import { codecOptions, PIX_FMTS, vtQuality } from '@/lib/args';
+import { isMac } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import type { JobRequest } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -42,7 +43,7 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                     <Select value={enc.codec} onValueChange={(v) => setEnc({ codec: v })}>
                         <SelectTrigger className="h-9 bg-input/60 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                            {CODECS.map((c) => <SelectItem key={c.value} value={c.value} className="text-xs">{c.label}</SelectItem>)}
+                            {codecOptions().map((c) => <SelectItem key={c.value} value={c.value} className="text-xs">{c.label}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
@@ -53,7 +54,9 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                         className={cn('h-9 bg-input/60 text-xs', bitRateMode && 'opacity-40')}
                         title={bitRateMode
                             ? '已设码率：编码器进入码率控制模式，质量档不生效（两者互斥）。码率清零即恢复'
-                            : '恒定质量因子，越低越清晰，常用 15-23。会按所选编码器自动映射为 crf / cq / qvbr_quality_level'} />
+                            : /_videotoolbox$/.test(enc.codec)
+                                ? `恒定质量因子（x264 刻度），越低越清晰，常用 15-23。苹果硬编按实测换算为同画质的质量值：当前 CRF ${enc.crf} → q ${vtQuality(enc.crf)}（0–100）`
+                                : '恒定质量因子，越低越清晰，常用 15-23。会按所选编码器自动映射为 crf / cq / qvbr_quality_level'} />
                 </div>
                 <div>
                     <Label className="mb-1.5 block text-xs text-muted-foreground">码率 Mbps（0 = 按质量）</Label>
@@ -119,6 +122,7 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                     </div>
                 )}
 
+                {isMac() ? <MacEncoderGuide /> : (
                 <div className="mt-3 rounded-lg border border-border/60 bg-black/20 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground/85">
                     <div className="mb-1 font-medium text-foreground/80">编码器怎么选</div>
                     在相同画质下，各编码器的差别<strong>不在"看起来怎样"，而在体积和速度</strong>。
@@ -151,8 +155,39 @@ export default function EncoderSection({ req, onChange, bare }: Props) {
                         所以上表适合用来<strong>选编码器</strong>，不适合当作绝对耗时/体积的预估。
                     </div>
                 </div>
+                )}
             </div>
         </SectionCard>
+    );
+}
+
+/** Mac 版的编码器选择说明：M5 Max 实测（2026-10，A20 前 240 帧 Lanczos ×2 到 2560×1440，
+ *  CRF 18 与等画质的苹果硬编 q 79，Y-PSNR 对无损参考；耗时含约 1.3 s 并行解码参考） */
+function MacEncoderGuide() {
+    return (
+        <div className="mt-3 rounded-lg border border-border/60 bg-black/20 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground/85">
+            <div className="mb-1 font-medium text-foreground/80">编码器怎么选（Mac）</div>
+            在相同画质下，各编码器的差别<strong>不在"看起来怎样"，而在体积和速度</strong>。
+            下表为 M5 Max 实测（<strong>Lanczos ×2</strong>，240 帧 1280×720→2560×1440，同等画质档，PSNR 对无损参考）：
+            <div className="mt-1.5 overflow-x-auto">
+                <table className="w-full text-[10.5px]">
+                    <thead className="text-muted-foreground/70">
+                        <tr><th className="pr-3 text-left font-normal">编码器</th><th className="pr-3 text-left font-normal">耗时</th><th className="pr-3 text-left font-normal">体积</th><th className="pr-3 text-left font-normal">PSNR</th><th className="text-left font-normal">适合</th></tr>
+                    </thead>
+                    <tbody className="text-muted-foreground/85">
+                        <tr><td className="pr-3">libx265</td><td className="pr-3">4.7s</td><td className="pr-3">6.8MB</td><td className="pr-3">47.7</td><td>体积最小，速度可接受</td></tr>
+                        <tr><td className="pr-3">libx264</td><td className="pr-3">2.4s</td><td className="pr-3">9.5MB</td><td className="pr-3">47.3</td><td>兼容性最好，默认推荐</td></tr>
+                        <tr><td className="pr-3">hevc_videotoolbox</td><td className="pr-3">1.4s</td><td className="pr-3">12.3MB</td><td className="pr-3">47.6</td><td>最快，体积约为 x264 的 1.3 倍</td></tr>
+                        <tr><td className="pr-3">h264_videotoolbox</td><td className="pr-3">1.4s</td><td className="pr-3">17.1MB</td><td className="pr-3">47.6</td><td>码率效率最差</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div className="mt-1.5">
+                M5 Max 上 x264 本身就很快，苹果硬编的速度优势远不如 Windows 上的 NVENC，体积反而更大。
+                建议默认 libx264；要压体积用 libx265；只有编码成了瓶颈（如 Lanczos 大批量）时才选 hevc_videotoolbox。
+                苹果硬编的质量档按 CRF 自动换算为同画质的质量值（CRF 18 ≈ q 79）；HEVC 输出自动标记 hvc1，可直接用 QuickTime 和访达预览播放。
+            </div>
+        </div>
     );
 }
 

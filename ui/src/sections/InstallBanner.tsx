@@ -1,4 +1,5 @@
 import { XCircle } from 'lucide-react';
+import { isMac } from '@/lib/platform';
 import type { InstallStatus } from '@/types';
 
 /**
@@ -20,11 +21,19 @@ export default function InstallBanner({ install }: { install: InstallStatus }) {
                         <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-red-200/90">
                             {install.missing.map((m) => <li key={m}>· {m}</li>)}
                         </ul>
-                        <div className="mt-1.5 text-muted-foreground">
-                            这些是程序本体文件，无法在线下载。请把完整的程序文件夹（约 9 GB，含
-                            build-desktop、engine-python、models、third_party）重新整体复制过来；
-                            若只有个别 .exe 缺失，请检查杀毒软件的隔离区。
-                        </div>
+                        {isMac() ? (
+                            <div className="mt-1.5 text-muted-foreground">
+                                这些是程序本体文件，无法在线下载。开发环境下请按 docs/macos/03-setup.md 编译 C++ 核心
+                                （scripts/macos/build-core.sh）并安装依赖（scripts/macos/bootstrap.sh）；
+                                FFmpeg 缺失时运行 brew install ffmpeg@7。
+                            </div>
+                        ) : (
+                            <div className="mt-1.5 text-muted-foreground">
+                                这些是程序本体文件，无法在线下载。请把完整的程序文件夹（约 9 GB，含
+                                build-desktop、engine-python、models、third_party）重新整体复制过来；
+                                若只有个别 .exe 缺失，请检查杀毒软件的隔离区。
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
