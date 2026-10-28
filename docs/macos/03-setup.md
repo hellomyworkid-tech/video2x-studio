@@ -143,3 +143,19 @@ bash scripts/macos/build-core.sh        # 产物：build-macos/video2x、build-m
 - `-l` 创建 Vulkan 实例失败：直接链接 MoltenVK
 
 详见 02 文档 A 节的"实测"说明。
+
+## 8. 运行界面（阶段 2）
+
+```bash
+cd ui
+npm run build      # 生成 ui/dist（bridge 与 Electron 用它托管界面）
+npm run desktop    # 桌面窗口：Electron 内启动 bridge（127.0.0.1:7199）
+npm run dev        # 或开发模式：bridge + vite（浏览器打开 http://localhost:3000）
+```
+
+- ffmpeg 默认用 `/opt/homebrew/opt/ffmpeg@7/bin`，可用 `VIDEO2X_FFMPEG_DIR` 覆盖；bridge 会把同一路径传给 Python 引擎。
+- 桌面窗口里的"添加视频""选择输出目录"用 macOS 原生对话框；浏览器开发模式下由 bridge 调 osascript 弹出，对话框可能出现在浏览器窗口后面。
+- 第一次读写桌面、文稿、下载、网络盘等位置时，系统会弹窗请求授权（隐私与安全性），允许即可。
+- 验收脚本（另起一个 7299 端口的 bridge，测完关掉）：
+  `BRIDGE_PORT=7299 node server/bridge.mjs &`，然后 `node scripts/macos/accept-bridge.mjs <输出目录>`。
+  测试 bridge 与正式程序共用 `cache/jobs.json`，测试期间不要同时开着桌面程序。

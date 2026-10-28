@@ -55,6 +55,20 @@
 | `sections/form/ProcessorSection.tsx` 各引擎说明 | 速度数据均为 RTX 5070 Ti 实测 | Mac 实测后补一套说明，或在说明里注明测试平台 |
 | `NewJobView.tsx:141` | "找不到 video2x.exe" | 文案去掉 `.exe` |
 
+### B、C 两节的实际实现（阶段 2，2026-10-28）
+
+上表各项均已按"Mac 处理"一列落地，平台差异集中在 `ui/server/platform.mjs`（bridge）与 `ui/src/lib/platform.ts`（界面）。与原计划不同、或计划之外的地方：
+
+- **文件对话框两种都用：** Electron 内用主进程的原生 dialog（`main.cjs` + `preload.cjs`，仅 macOS 暴露 `showDialog`），浏览器开发模式（`npm run dev`）走 bridge 的 osascript。Windows 仍是 PowerShell，行为不变。
+- **网络盘判断：** 用 `/sbin/mount` 输出（挂载点最长前缀匹配，类型为 smbfs / nfs / afpfs / webdav / cifs），没有用 `statfsSync`，因为 Node 拿不到文件系统类型名。另外，macOS 的隐私权限（TCC）会拦截未授权进程访问网络卷：App 第一次读网络盘时系统会弹窗请求授权。
+- **设备接口改名：** 新增 `/api/torch-devices`，保留 `/api/cuda-devices` 兼容旧界面。Mac 上返回 `{index:0, name, type:'mps', vramGb:<recommended_max_memory>, memGb:<统一内存>}`，`vramGb` 与 worker 的内存门槛同一口径。
+- **调度键：** Mac 只有一块 GPU，ncnn 与 PyTorch 任务直接归到同一个键 `Apple GPU#0`，不靠两套枚举的设备名对齐。
+- **未移植的引擎：** `/api/health` 报告 `pythonEngine.supported`（Mac 目前只有 swiftvr），界面把 RealBasicVSR / SeedVR2 置灰，`POST /api/jobs` 也会拒绝。否则 RealBasicVSR 会静默回退 CPU。
+- **libplacebo：** 按 ffmpeg 是否带该滤镜决定是否放开 Anime4K 与 HDR（`/api/health` 的 `features.libplacebo`），没有按平台写死，阶段 4 换上带 libplacebo 的 FFmpeg 后自动放开。
+- **编码器的质量参数（顺带修了跨平台问题）：** CLI 的 `-e` 原来只设编码器私有选项，VideoToolbox 的恒定质量（`flags=+qscale` + `global_quality`）设不进去，会静默退回默认码率。`encoder.cpp` 改为 `AV_OPT_SEARCH_CHILDREN`，私有选项优先，通用选项也能设。CRF → VideoToolbox 质量值按实测标定为 `q = 115 − 2×CRF`（界面 `vtQuality` 与 worker `vt_quality` 同一公式）。macOS 上 HEVC 输出标 `hvc1`，QuickTime 和访达预览才能播放。
+- **硬件解码（跨平台 bug）：** ncnn 系处理器（Real-ESRGAN / Real-CUGAN / SPAN / RIFE）配 `-a` 硬件解码时，帧留在 GPU 表面，转换失败，任务直接退出。滤镜链路（Lanczos、防抖、降噪）有拷回内存，ncnn 链路没有。`conversions.cpp` 的 `convert_avframe_pix_fmt` 补上 `av_hwframe_transfer_data`，Mac 上 `-a videotoolbox` 五个处理器均与参考输出比对达标。Windows 的 cuda / d3d11va 应同样受益，但未在 Windows 上验证。
+- **未采用 `prores_videotoolbox`：** ProRes 不走恒定质量参数，与界面的 CRF 输入框不匹配，暂不列入。
+
 ## D. Python 引擎（阶段 3）
 
 | 位置 | 现状 | Mac 处理 |
