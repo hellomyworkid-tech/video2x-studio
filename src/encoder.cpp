@@ -170,7 +170,12 @@ int Encoder::init(
         std::string opt_value_str = opt_value;
         logger()->debug("Setting encoder option '{}' to '{}'", opt_name_str, opt_value_str);
 
-        ret = av_opt_set(enc_ctx_->priv_data, opt_name_str.c_str(), opt_value_str.c_str(), 0);
+        // Search the encoder's private options first (same precedence as before), then the
+        // generic AVCodecContext options: VideoToolbox's constant-quality mode is only reachable
+        // through the generic flags=+qscale and global_quality
+        ret = av_opt_set(
+            enc_ctx_, opt_name_str.c_str(), opt_value_str.c_str(), AV_OPT_SEARCH_CHILDREN
+        );
         if (ret < 0) {
             char errbuf[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(ret, errbuf, sizeof(errbuf));
@@ -198,6 +203,15 @@ int Encoder::init(
         logger()->error("Failed to copy encoder parameters to output video stream");
         return ret;
     }
+
+#ifdef __APPLE__
+    // QuickTime / AVFoundation only play HEVC in MP4/MOV tagged 'hvc1' (FFmpeg defaults to
+    // 'hev1', which Finder preview and QuickTime Player refuse to open)
+    if (enc_ctx_->codec_id == AV_CODEC_ID_HEVC &&
+        (strstr(ofmt_ctx_->oformat->name, "mp4") || strstr(ofmt_ctx_->oformat->name, "mov"))) {
+        out_vstream->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
+    }
+#endif
 
     // Copy time base and frame rate from the encoder context
     out_vstream->time_base = enc_ctx_->time_base;

@@ -50,7 +50,7 @@ except ImportError:
     sys.modules['decord'] = types.SimpleNamespace(bridge=types.SimpleNamespace(set_bridge=lambda *a, **k: None))
 
 from worker import (probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog,  # noqa: E402
-                    pause_requested, resolve_device, validate_cuda_device, quality_args,
+                    pause_requested, resolve_device, validate_cuda_device, quality_args, codec_tag_args,
                     decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest,
                     is_oom_error, empty_device_cache, device_allocated_gb)
 
@@ -552,6 +552,7 @@ def main(args):
                    '-s', f'{oW}x{oH}', '-r', fps_str, '-i', 'pipe:0',
                    '-an', '-c:v', args.codec,
                    *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
+                   *codec_tag_args(args.codec),
                    *encode_color_args(), '-pix_fmt', getattr(args, 'pix_fmt', 'yuv420p'), seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE, bufsize=frame_bytes * 4)
         enc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)

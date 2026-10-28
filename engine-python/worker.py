@@ -294,6 +294,7 @@ def quality_args(codec, crf, bit_rate=0):
       crf                —— libx264 / libx265 / libaom-av1 / libvpx-vp9 等
       cq                 —— *_nvenc（N 卡硬编）
       qvbr_quality_level —— *_amf（A 卡硬编），需同时把 rc 切到 qvbr
+      q:v                —— *_videotoolbox（Mac 硬编），刻度相反，按 vt_quality 换算
     码率 > 0 时切到码率控制（-b:v）并且不发任何质量档参数：x264/x265 同时收到
     crf 与码率时以 crf 为准、静默丢弃码率，两者必须互斥（与 UI/CLI 链路同一规则）。
     """
@@ -304,7 +305,25 @@ def quality_args(codec, crf, bit_rate=0):
         return ['-cq', str(crf)]
     if c.endswith('_amf'):
         return ['-rc', 'qvbr', '-qvbr_quality_level', str(crf)]
+    if c.endswith('_videotoolbox'):
+        return ['-q:v', str(vt_quality(crf))]
     return ['-crf', str(crf)]
+
+
+def vt_quality(crf):
+    """x264 的 CRF → VideoToolbox 的质量值（0–100，越大越清晰）。与 ui/src/lib/args.ts 的 vtQuality 同一公式。
+    M5 Max 实测标定（Lanczos ×2 到 2560×1440，240 帧，按 Y-PSNR 相等对齐）：CRF 16/18/20/23/26/28
+    分别对应 q≈82/79/75/68/63/58，h264 与 hevc 两个编码器几乎相同，拟合为 115 - 2×CRF"""
+    return max(1, min(100, round(115 - 2 * int(crf))))
+
+
+def codec_tag_args(codec):
+    """macOS 上 HEVC 标 hvc1：QuickTime / 访达预览只认 hvc1，ffmpeg 默认的 hev1 打不开。
+    宏分片都是 .mp4，合并时 -c:v copy 会沿用该标签"""
+    c = str(codec or '')
+    if sys.platform == 'darwin' and ('hevc' in c or '265' in c):
+        return ['-tag:v', 'hvc1']
+    return []
 
 
 def decode_cfr_args(fps_str):
@@ -674,6 +693,7 @@ def main():
                    '-s', f'{OW}x{OH}', '-r', fps_str, '-i', 'pipe:0',
                    '-an', '-c:v', args.codec,
                    *quality_args(args.codec, args.crf, getattr(args, 'bit_rate', 0)),
+                   *codec_tag_args(args.codec),
                    *encode_color_args(), '-pix_fmt', getattr(args, 'pix_fmt', 'yuv420p'), seg_file]
         dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE,
                                bufsize=frame_bytes * 4)
