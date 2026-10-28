@@ -3,6 +3,10 @@
 #include <cstddef>
 #include <cstdio>
 
+extern "C" {
+#include <libavutil/hwcontext.h>
+}
+
 #include <spdlog/spdlog.h>
 
 #include "logger_manager.h"
@@ -13,9 +17,24 @@ namespace conversions {
 // Convert AVFrame format
 V2X_TARGET_CLONES
 AVFrame* convert_avframe_pix_fmt(AVFrame* src_frame, AVPixelFormat pix_fmt) {
+    // Hardware-decoded frames (-a cuda / d3d11va / videotoolbox ...) live in GPU surfaces that
+    // swscale cannot read: download them to system memory first, as filter_ffmpeg_graph does.
+    // Covers every caller: ncnn input, frames passed straight to the encoder, scene detection
+    AVFrame* sw_frame = nullptr;
+    if (src_frame->hw_frames_ctx != nullptr) {
+        sw_frame = av_frame_alloc();
+        if (sw_frame == nullptr || av_hwframe_transfer_data(sw_frame, src_frame, 0) < 0) {
+            logger()->error("Failed to transfer hardware frame to system memory.");
+            av_frame_free(&sw_frame);
+            return nullptr;
+        }
+        src_frame = sw_frame;
+    }
+
     AVFrame* dst_frame = av_frame_alloc();
     if (dst_frame == nullptr) {
         logger()->error("Failed to allocate destination AVFrame.");
+        av_frame_free(&sw_frame);
         return nullptr;
     }
 
@@ -27,6 +46,7 @@ AVFrame* convert_avframe_pix_fmt(AVFrame* src_frame, AVPixelFormat pix_fmt) {
     if (av_frame_get_buffer(dst_frame, 32) < 0) {
         logger()->error("Failed to allocate memory for AVFrame.");
         av_frame_free(&dst_frame);
+        av_frame_free(&sw_frame);
         return nullptr;
     }
 
@@ -47,6 +67,7 @@ AVFrame* convert_avframe_pix_fmt(AVFrame* src_frame, AVPixelFormat pix_fmt) {
     if (sws_ctx == nullptr) {
         logger()->error("Failed to initialize swscale context.");
         av_frame_free(&dst_frame);
+        av_frame_free(&sw_frame);
         return nullptr;
     }
 
@@ -63,6 +84,7 @@ AVFrame* convert_avframe_pix_fmt(AVFrame* src_frame, AVPixelFormat pix_fmt) {
 
     // Clean up
     sws_freeContext(sws_ctx);
+    av_frame_free(&sw_frame);
 
     return dst_frame;
 }
