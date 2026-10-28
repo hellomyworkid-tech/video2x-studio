@@ -1,9 +1,36 @@
 // Video2X Studio — Electron main process
 // Starts the local bridge (API + static frontend), then opens a native window.
 
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+
+// 与 bridge 的 VIDEO_EXTS 一致
+const VIDEO_EXTS = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm2ts', 'ts', 'mpg', 'mpeg', 'rmvb', 'rm',
+    'asf', 'vob', '3gp', 'm4v'];
+
+// macOS：文件对话框用 Electron 的原生 dialog（挂在主窗口上、无需额外权限）。
+// Windows 维持 bridge 的 PowerShell 对话框，preload 也只在 macOS 暴露此接口
+if (process.platform === 'darwin') {
+    ipcMain.handle('v2x:dialog', async (_event, kind) => {
+        const win = BrowserWindow.getFocusedWindow() || mainWindow;
+        if (kind === 'save') {
+            const r = await dialog.showSaveDialog(win, {
+                defaultPath: 'output.mp4',
+                filters: [{ name: '视频文件', extensions: ['mp4', 'mkv', 'avi', 'mov', 'webm'] }],
+            });
+            return r.canceled || !r.filePath ? [] : [r.filePath];
+        }
+        const r = await dialog.showOpenDialog(win, kind === 'dir'
+            ? { title: '选择输出目录', properties: ['openDirectory', 'createDirectory'] }
+            : {
+                title: '选择一个或多个视频文件',
+                properties: ['openFile', 'multiSelections'],
+                filters: [{ name: '视频文件', extensions: VIDEO_EXTS }, { name: '所有文件', extensions: ['*'] }],
+            });
+        return r.canceled ? [] : r.filePaths;
+    });
+}
 
 const PORT = Number(process.env.BRIDGE_PORT || 7199);
 const APP_URL = `http://127.0.0.1:${PORT}/`;

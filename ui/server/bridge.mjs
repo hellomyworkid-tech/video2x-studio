@@ -11,6 +11,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import util from 'node:util';
+import {
+    CLI_REL, CORE_LIB_REL, ENGINE_SPAWN_OPTS, EXE_SUFFIX, PLATFORM, PY_ENGINES, SEEDVR2_DIT, SHARED_GPU_KEY,
+    TORCH_DEVICES_PY, abortTree, childEnv, ffmpegDir, isNetworkPath, killTreeSync, nativeDialog, onTerminate,
+    openDirectory, pythonPaths, revealOutput, suspendTree, swiftvrPrecheck,
+} from './platform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,7 +30,7 @@ function findProjectRoot() {
     if (process.env.VIDEO2X_PROJECT_ROOT) {
         return { root: path.resolve(process.env.VIDEO2X_PROJECT_ROOT), found: true };
     }
-    const cliRel = path.join('build-desktop', 'Release', 'video2x.exe');
+    const cliRel = CLI_REL;
     const starts = [];
     if (process.env.PORTABLE_EXECUTABLE_DIR) starts.push(process.env.PORTABLE_EXECUTABLE_DIR);
     starts.push(path.dirname(process.execPath), process.cwd());
@@ -49,25 +54,20 @@ const STATIC_DIR =
 
 const CLI_PATH =
     process.env.VIDEO2X_CLI ||
-    path.join(PROJECT_ROOT, 'build-desktop', 'Release', 'video2x.exe');
+    path.join(PROJECT_ROOT, CLI_REL);
 
 // Python sidecar (PyTorch engines: RealBasicVSR / SeedVR2)
 // 优先使用随包携带的独立运行时 engine-python/python（便携版）；
 // 不存在时回退到开发环境的 .venv
-const PYTHON_BUNDLED = path.join(PROJECT_ROOT, 'engine-python', 'python', 'python.exe');
+const { bundled: PYTHON_BUNDLED, venv: PYTHON_VENV } = pythonPaths(PROJECT_ROOT);
 const PYTHON_EXE =
     process.env.VIDEO2X_PYTHON ||
-    (fs.existsSync(PYTHON_BUNDLED)
-        ? PYTHON_BUNDLED
-        : path.join(PROJECT_ROOT, 'engine-python', '.venv', 'Scripts', 'python.exe'));
+    (fs.existsSync(PYTHON_BUNDLED) ? PYTHON_BUNDLED : PYTHON_VENV);
 const PY_WORKER = path.join(PROJECT_ROOT, 'engine-python', 'worker.py');
 
-// 进程树挂起/恢复（真暂停）：NtSuspendProcess 包装脚本，与本文件同目录
-const SUSPEND_PS1 = path.join(__dirname, 'suspend_tree.ps1');
-const PS_EXE = 'powershell.exe';
 const PY_WEIGHTS = {
     realbasicvsr: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'realbasicvsr_x4.pth'),
-    seedvr2: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'SeedVR2-3B', 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'),
+    seedvr2: path.join(PROJECT_ROOT, 'engine-python', 'weights', 'SeedVR2-3B', SEEDVR2_DIT.file),
 };
 // SwiftVR：便携包随附预转换 FP8 单文件（约 5 GB）；也接受官方原版 FP32 权重（约 19 GB，载入时现场量化）
 const SWIFTVR_DIR = path.join(PROJECT_ROOT, 'engine-python', 'weights', 'SwiftVR');
@@ -88,25 +88,46 @@ function pythonEngineStatus() {
         realbasicvsrWeights: fs.existsSync(PY_WEIGHTS.realbasicvsr),
         seedvr2Weights: fs.existsSync(PY_WEIGHTS.seedvr2),
         swiftvrWeights: swiftvrWeightsReady(),
+        // 本平台已完成移植的引擎；未列出的在界面上禁用
+        supported: PY_ENGINES,
     };
 }
+
+const FFPROBE = path.join(ffmpegDir(PROJECT_ROOT), `ffprobe${EXE_SUFFIX}`);
+const FFMPEG = path.join(ffmpegDir(PROJECT_ROOT), `ffmpeg${EXE_SUFFIX}`);
 
 // 程序本体（随便携包分发、不提供下载）是否完整。缺任何一项都意味着拷贝/打包不完整，
 // 下载权重无法补救——界面据此显示红色错误条并隐藏"立即下载"
 function installStatus() {
     const core = [
-        path.join('build-desktop', 'Release', 'video2x.exe'),
-        path.join('build-desktop', 'Release', 'libvideo2x.dll'),
-        path.join('third_party', 'ffmpeg-shared', 'bin', 'ffmpeg.exe'),
-        path.join('models', 'realesrgan'),
+        path.join(PROJECT_ROOT, CLI_REL),
+        path.join(PROJECT_ROOT, CORE_LIB_REL),
+        FFMPEG,
+        path.join(PROJECT_ROOT, 'models', 'realesrgan'),
     ];
-    const missing = core.filter((rel) => !fs.existsSync(path.join(PROJECT_ROOT, rel)));
+    // 项目内的文件报相对路径；macOS 开发期 ffmpeg 在项目外（Homebrew），报绝对路径
+    const label = (abs) => {
+        const rel = path.relative(PROJECT_ROOT, abs);
+        return rel.startsWith('..') || path.isAbsolute(rel) ? abs : rel;
+    };
+    const missing = core.filter((abs) => !fs.existsSync(abs)).map(label);
     if (!fs.existsSync(PYTHON_EXE)) missing.push(path.relative(PROJECT_ROOT, PYTHON_BUNDLED));
     return { complete: missing.length === 0, rootFound: PROJECT_ROOT_FOUND, root: PROJECT_ROOT, missing };
 }
 
-const FFPROBE = path.join(PROJECT_ROOT, 'third_party', 'ffmpeg-shared', 'bin', 'ffprobe.exe');
-const FFMPEG = path.join(PROJECT_ROOT, 'third_party', 'ffmpeg-shared', 'bin', 'ffmpeg.exe');
+/** FFmpeg 是否带 libplacebo 滤镜（Anime4K 与 HDR 依赖它；Homebrew 的 ffmpeg@7 没有）。
+ *  C++ 核心与 ffmpeg 可执行文件用的是同一份 FFmpeg 库。探测失败时返回 null（未知，按可用处理） */
+let libplaceboCache;
+function libplaceboAvailable() {
+    if (libplaceboCache !== undefined) return libplaceboCache;
+    try {
+        const r = spawnSync(FFMPEG, ['-hide_banner', '-filters'], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+        libplaceboCache = r.status === 0 ? /\blibplacebo\b/.test(r.stdout || '') : null;
+    } catch {
+        libplaceboCache = null;
+    }
+    return libplaceboCache;
+}
 
 // ---------------------------------------------------------------------------
 // 自动预处理（本地暂存）：网络盘或高风险封装的输入先落地再处理
@@ -203,15 +224,16 @@ const ASSETS = [
     // video2x.exe / NCNN models / Python 运行时随便携包分发，不提供自动下载
     {
         id: 'seedvr2',
-        name: 'SeedVR2-3B 引擎权重（FP8）',
+        name: `SeedVR2-3B 引擎权重（${SEEDVR2_DIT.label}）`,
         files: [
             {
-                rel: path.join('engine-python', 'weights', 'SeedVR2-3B', 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'),
-                size: 3391544696,
-                sha256: '3bf1e43ebedd570e7e7a0b1b60d6a02e105978f505c8128a241cde99a8240cff',
+                // DiT 按平台取文件：MPS 不支持 FP8 张量，Mac 用官方 fp16 版（见 platform.mjs）
+                rel: path.join('engine-python', 'weights', 'SeedVR2-3B', SEEDVR2_DIT.file),
+                size: SEEDVR2_DIT.size,
+                sha256: SEEDVR2_DIT.sha256,
                 verify: 'hash',
-                urls: [HF_MIRROR + SEEDVR2_REPO + 'seedvr2_ema_3b_fp8_e4m3fn.safetensors',
-                       HF + SEEDVR2_REPO + 'seedvr2_ema_3b_fp8_e4m3fn.safetensors'],
+                urls: [HF_MIRROR + SEEDVR2_REPO + SEEDVR2_DIT.file,
+                       HF + SEEDVR2_REPO + SEEDVR2_DIT.file],
             },
             {
                 rel: path.join('engine-python', 'weights', 'SeedVR2-3B', 'ema_vae_fp16.safetensors'),
@@ -486,7 +508,7 @@ let vulkanDevicesCache = null;
 function getVulkanDevices() {
     if (vulkanDevicesCache) return vulkanDevicesCache;
     try {
-        const env = { ...process.env, PATH: [...DLL_DIRS, process.env.PATH].join(';') };
+        const env = childEnv(PROJECT_ROOT);
         const r = spawnSync(CLI_PATH, ['-l'], { env, cwd: PROJECT_ROOT, timeout: 30000, windowsHide: true });
         const devices = parseDeviceList(`${r.stdout || ''}\n${r.stderr || ''}`);
         if (devices.length > 0) vulkanDevicesCache = devices;
@@ -501,18 +523,6 @@ function resolveAutoDevice() {
     const discrete = devices.find((d) => /discrete/i.test(d.type));
     return discrete ? discrete.index : 0;
 }
-
-// DLL search paths required by video2x.exe at runtime
-const DLL_DIRS = [
-    path.join(PROJECT_ROOT, 'build-desktop', 'Release'),
-    path.join(PROJECT_ROOT, 'third_party', 'ffmpeg-shared', 'bin'),
-    path.join(PROJECT_ROOT, 'third_party', 'ncnn-shared', 'x64', 'bin'),
-    path.join(PROJECT_ROOT, 'build-desktop', 'third_party', 'librealcugan_ncnn_vulkan', 'src', 'Release'),
-    path.join(PROJECT_ROOT, 'build-desktop', 'third_party', 'librealesrgan_ncnn_vulkan', 'src', 'Release'),
-    path.join(PROJECT_ROOT, 'build-desktop', 'third_party', 'librife_ncnn_vulkan', 'src', 'Release'),
-    path.join(PROJECT_ROOT, 'build-desktop', 'third_party', 'spdlog', 'Release'),
-    path.join(PROJECT_ROOT, 'build-desktop', 'third_party', 'boost', 'libs', 'program_options', 'Release'),
-];
 
 // ---------------------------------------------------------------------------
 // Job store
@@ -712,9 +722,8 @@ export function shutdownBridge() {
     for (const job of jobs.values()) {
         if (job.status === 'running' && job.child && job.child.pid) {
             try {
-                // spawnSync 保证在 before-quit 短暂窗口内完成
-                spawnSync('taskkill', ['/pid', String(job.child.pid), '/t', '/f'],
-                    { windowsHide: true, timeout: 8000 });
+                // 同步执行，保证在 before-quit 短暂窗口内完成
+                killTreeSync(job.child.pid);
             } catch { /* best effort */ }
         }
     }
@@ -754,7 +763,7 @@ function freeBytes(p) {
 
 function needsStaging(job) {
     if (job.autoStage === false) return false;
-    if (/^\\\\/.test(job.file)) return true; // UNC 网络路径
+    if (isNetworkPath(job.file)) return true; // 网络盘（Windows UNC / macOS 的 SMB、NFS 等挂载）
     return RISKY_EXTS.has(path.extname(job.file).toLowerCase());
 }
 
@@ -836,8 +845,8 @@ function remuxToMkv(job, dest, transcodeAudio) {
             '-map', '0:v:0', '-map', '0:a?',
             ...(transcodeAudio ? ['-c:v', 'copy', '-c:a', 'aac'] : ['-c', 'copy']),
             '-progress', 'pipe:1', '-nostats', '-f', 'matroska', part,
-        ], { windowsHide: true });
-        job.child = child; // 复用中止端点的 taskkill
+        ], ENGINE_SPAWN_OPTS);
+        job.child = child; // 复用中止端点的杀进程树
         let lastTick = 0;
         let errTail = '';
         const onLine = (chunk) => {
@@ -898,7 +907,7 @@ async function ensureStaged(job) {
     job.frame = 0;
     job.totalFrames = 0;
     job.remaining = '';
-    const why = /^\\\\/.test(job.file) ? '网络共享盘源' : '高风险封装';
+    const why = isNetworkPath(job.file) ? '网络共享盘源' : '高风险封装';
     logJob(job, `[bridge] 预处理（${why}）：${risky ? '无损重封装为 MKV' : '拷贝到本地暂存'} → cache/${path.basename(dest)}`);
     broadcastJobs();
     if (risky) {
@@ -936,9 +945,11 @@ function physicalGpuKey(dev, list) {
 }
 
 function slotKeyOf(job) {
+    // 整机只有一块 GPU（Apple Silicon）：ncnn 与 PyTorch 任务归到同一个键，串行执行
+    if (SHARED_GPU_KEY) return SHARED_GPU_KEY;
     if (job.engine === 'python') {
         const m = String(job.args[job.args.indexOf('--device') + 1] || '').match(/^cuda:(\d+)$/);
-        const list = cudaDevicesCache?.devices || [];
+        const list = torchDevicesCache?.devices || [];
         const dev = m ? list.find((d) => d.index === Number(m[1])) : null;
         return dev ? physicalGpuKey(dev, list) : EXCLUSIVE;
     }
@@ -1018,8 +1029,7 @@ function spawnJob(job) {
         }
     }
 
-    const env = { ...process.env };
-    env.PATH = [...DLL_DIRS, env.PATH].join(';');
+    const env = childEnv(PROJECT_ROOT);
 
     const isPy = job.engine === 'python';
     const spawnCmd = isPy ? PYTHON_EXE : CLI_PATH;
@@ -1029,7 +1039,7 @@ function spawnJob(job) {
     const child = spawn(spawnCmd, spawnArgs, {
         cwd: PROJECT_ROOT, // models/ 与 engine-python/weights 均相对项目根解析
         env,
-        windowsHide: true,
+        ...ENGINE_SPAWN_OPTS,
     });
     job.child = child;
 
@@ -1117,46 +1127,6 @@ function spawnJob(job) {
 }
 
 // ---------------------------------------------------------------------------
-// Native dialogs via PowerShell (real Windows paths, no browser sandbox)
-// ---------------------------------------------------------------------------
-function psDialog(kind) {
-    return new Promise((resolve, reject) => {
-        let script;
-        if (kind === 'dir') {
-            script = `
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = '选择输出目录'
-if ($d.ShowDialog() -eq 'OK') { [Console]::OutputEncoding=[Text.Encoding]::UTF8; Write-Output $d.SelectedPath }`;
-        } else if (kind === 'save') {
-            script = `
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.SaveFileDialog
-$d.Filter = '视频文件|*.mp4;*.mkv;*.avi;*.mov;*.webm|所有文件|*.*'
-if ($d.ShowDialog() -eq 'OK') { [Console]::OutputEncoding=[Text.Encoding]::UTF8; Write-Output $d.FileName }`;
-        } else {
-            script = `
-Add-Type -AssemblyName System.Windows.Forms
-$d = New-Object System.Windows.Forms.OpenFileDialog
-$d.Multiselect = $true
-$d.Filter = '视频文件|*.mp4;*.mkv;*.avi;*.mov;*.webm;*.flv;*.wmv;*.m2ts;*.ts;*.mpg;*.mpeg|所有文件|*.*'
-$d.Title = '选择一个或多个视频文件'
-if ($d.ShowDialog() -eq 'OK') { [Console]::OutputEncoding=[Text.Encoding]::UTF8; $d.FileNames | ForEach-Object { Write-Output $_ } }`;
-        }
-        execFile(
-            'powershell.exe',
-            ['-NoProfile', '-NonInteractive', '-STA', '-Command', script],
-            { timeout: 300000, maxBuffer: 4 * 1024 * 1024 },
-            (err, stdout) => {
-                if (err) return reject(err);
-                const files = stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-                resolve(files);
-            }
-        );
-    });
-}
-
-// ---------------------------------------------------------------------------
 // HTTP API
 // ---------------------------------------------------------------------------
 function readBody(req) {
@@ -1181,7 +1151,7 @@ function send(res, code, obj) {
     res.end(body);
 }
 
-let cudaDevicesCache = null; // CUDA 设备枚举缓存（torch import 慢，成功后常驻）
+let torchDevicesCache = null; // PyTorch 设备枚举缓存（CUDA 卡或 MPS；torch import 慢，成功后常驻）
 
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -1206,12 +1176,14 @@ const server = http.createServer(async (req, res) => {
                 staticDir: STATIC_DIR,
                 staticDirExists: fs.existsSync(STATIC_DIR),
                 pythonEngine: pythonEngineStatus(),
+                // 界面据此切换编码器列表、设备选择、路径写法；features 为探测到的可选能力
+                platform: PLATFORM,
+                features: { libplacebo: libplaceboAvailable() !== false },
             });
         }
 
         if (route === 'GET /api/devices') {
-            const env = { ...process.env };
-            env.PATH = [...DLL_DIRS, env.PATH].join(';');
+            const env = childEnv(PROJECT_ROOT);
             execFile(CLI_PATH, ['-l'], { env, cwd: PROJECT_ROOT, timeout: 30000 }, (err, stdout, stderr) => {
                 const out = `${stdout}\n${stderr}`;
                 const devices = parseDeviceList(out);
@@ -1221,28 +1193,29 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        if (route === 'GET /api/cuda-devices') {
+        // 旧路由 /api/cuda-devices 保留，兼容尚未更新的界面
+        if (route === 'GET /api/torch-devices' || route === 'GET /api/cuda-devices') {
             // CUDA 与 Vulkan 是两套独立编号空间（核显机上必然错位）：
-            // 旗舰引擎（PyTorch）的设备选择必须用这份 CUDA 枚举，不能复用上方 Vulkan 列表
-            if (cudaDevicesCache) return send(res, 200, cudaDevicesCache);
-            execFile(PYTHON_EXE, ['-c',
-                'import torch,json;print(json.dumps({"devices":[{"index":i,"name":torch.cuda.get_device_name(i),"vramGb":round(torch.cuda.get_device_properties(i).total_memory/2**30,1)} for i in range(torch.cuda.device_count())]}))'],
+            // 旗舰引擎（PyTorch）的设备选择必须用这份枚举，不能复用上方 Vulkan 列表。
+            // macOS 上返回唯一的 MPS 设备（Apple GPU）
+            if (torchDevicesCache) return send(res, 200, torchDevicesCache);
+            execFile(PYTHON_EXE, ['-c', TORCH_DEVICES_PY],
                 // torch import 较慢（首次约 10s），成功后永久缓存；失败不缓存（环境可能未就绪）
                 { timeout: 120000 }, (err, stdout) => {
                     if (!err) {
                         try {
-                            cudaDevicesCache = JSON.parse(String(stdout).trim());
-                            return send(res, 200, cudaDevicesCache);
+                            torchDevicesCache = JSON.parse(String(stdout).trim());
+                            return send(res, 200, torchDevicesCache);
                         } catch { /* fallthrough */ }
                     }
-                    send(res, 200, { devices: [], error: err ? String(err).slice(0, 160) : 'CUDA 枚举失败' });
+                    send(res, 200, { devices: [], error: err ? String(err).slice(0, 160) : 'GPU 枚举失败' });
                 });
             return;
         }
 
         if (route === 'POST /api/browse') {
             const body = await readBody(req);
-            const files = await psDialog(body.kind || 'open');
+            const files = await nativeDialog(body.kind || 'open');
             return send(res, 200, { files });
         }
 
@@ -1286,6 +1259,15 @@ const server = http.createServer(async (req, res) => {
             const body = await readBody(req);
             const items = Array.isArray(body.items) ? body.items : [];
             if (items.length === 0) return send(res, 400, { error: '任务列表为空' });
+            // 本平台尚未完成移植的 PyTorch 引擎直接拒绝（界面已禁用，这里兜底直接调接口的情况）
+            for (const item of items) {
+                if (item.engine !== 'python') continue;
+                const args = Array.isArray(item.args) ? item.args.map(String) : [];
+                const model = args[args.indexOf('--model') + 1];
+                if (args.includes('--model') && !PY_ENGINES.includes(model)) {
+                    return send(res, 400, { error: `${model} 引擎尚未在本平台完成移植，暂不可用` });
+                }
+            }
             const batchId = nextBatchId++;
             const created = [];
             // 输出路径去重：同一路径已存在输出（或同批次撞名）时自动追加 _2/_3…，
@@ -1367,21 +1349,16 @@ const server = http.createServer(async (req, res) => {
                 job.finishedAt = Date.now();
             } else if (job.status === 'running') {
                 // 无条件置旗标：预处理整文件拷贝轮询 abortRequested（无 child 可杀），
-                // remux/正式处理再叠加 taskkill
+                // remux/正式处理再叠加杀进程树
                 job.abortRequested = true;
                 if (job.child) {
                     try {
-                        if (job.suspended) {
-                            // 已挂起的进程先解冻，保证 taskkill 能干净结束并释放显存
-                            job.suspended = false;
-                            execFile(PS_EXE, ['-ExecutionPolicy', 'Bypass', '-File', SUSPEND_PS1,
-                                '-RootPid', String(job.child.pid), '-Mode', 'resume'],
-                                { timeout: 30000 }, () => {
-                                    execFile('taskkill', ['/pid', String(job.child.pid), '/t', '/f'], () => {});
-                                });
+                        // 已挂起的进程：Windows 先解冻再 taskkill，macOS 直接 SIGKILL（见 abortTree）
+                        const wasSuspended = job.suspended;
+                        job.suspended = false;
+                        abortTree(job.child.pid, wasSuspended);
+                        if (wasSuspended) {
                             try { fs.unlinkSync(job.outPath + '.v2xsuspended'); } catch { /* best effort */ }
-                        } else {
-                            execFile('taskkill', ['/pid', String(job.child.pid), '/t', '/f'], () => {});
                         }
                     } catch { /* best effort */ }
                 }
@@ -1435,8 +1412,7 @@ const server = http.createServer(async (req, res) => {
             const pid = job.child.pid;
             job.suspended = true; // 先置位，防双击并发
             broadcastJobs();
-            execFile(PS_EXE, ['-ExecutionPolicy', 'Bypass', '-File', SUSPEND_PS1,
-                '-RootPid', String(pid), '-Mode', 'suspend'], { timeout: 60000 }, (err, stdout) => {
+            suspendTree(pid, 'suspend', (err, stdout) => {
                 if (err) {
                     job.suspended = false;
                     try { fs.unlinkSync(job.outPath + '.v2xsuspended'); } catch { /* best effort */ }
@@ -1459,8 +1435,7 @@ const server = http.createServer(async (req, res) => {
             const pid = job.child.pid;
             job.suspended = false; // 先置位，防双击并发
             broadcastJobs();
-            execFile(PS_EXE, ['-ExecutionPolicy', 'Bypass', '-File', SUSPEND_PS1,
-                '-RootPid', String(pid), '-Mode', 'resume'], { timeout: 60000 }, (err, stdout) => {
+            suspendTree(pid, 'resume', (err, stdout) => {
                 if (err) {
                     job.suspended = true; // 恢复失败，回到挂起态
                     logJob(job, `[bridge] 恢复失败：${err.message}`);
@@ -1567,31 +1542,14 @@ const server = http.createServer(async (req, res) => {
         if (folderMatch) {
             const job = jobs.get(Number(folderMatch[1]));
             if (!job) return send(res, 404, { error: '任务不存在' });
-            // 输出文件存在则定位到文件，否则打开所在目录。
-            // 注意：explorer 的 /select 对 UNC 网络路径（\\server\...）解析失败
-            // 会静默打开"文档"，因此网络路径一律改为直接打开所在目录。
-            const isUnc = job.outPath.startsWith('\\\\');
-            // 路径含空格时 Node 会把整个参数包成 "/select,C:\a b\x.mp4"，explorer 解析不了，
-            // 同样静默退回"文档"。改为 windowsVerbatimArguments 手动拼命令行：
-            // 只给路径加引号，/select, 前缀留在引号外（实测含空格/中文两种形态均正确定位）。
-            const target = !isUnc && fs.existsSync(job.outPath)
-                ? `/select,"${job.outPath}"`
-                : `"${path.dirname(job.outPath)}"`;
-            const child = spawn('explorer.exe', [target], {
-                detached: true, stdio: 'ignore', windowsVerbatimArguments: true,
-            });
-            child.on('error', () => {}); // explorer 退出码不规范，忽略
-            child.unref();
+            // 输出文件存在则定位到文件，否则打开所在目录（各平台的细节见 platform.mjs）
+            revealOutput(job.outPath);
             return send(res, 200, { ok: true });
         }
 
         if (route === 'POST /api/logs/open') {
             fs.mkdirSync(LOG_DIR, { recursive: true });
-            const child = spawn('explorer.exe', [`"${LOG_DIR}"`], {
-                detached: true, stdio: 'ignore', windowsVerbatimArguments: true,
-            });
-            child.on('error', () => {});
-            child.unref();
+            openDirectory(LOG_DIR);
             return send(res, 200, { ok: true, dir: LOG_DIR });
         }
 
@@ -1727,7 +1685,8 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 200, { ok: false, warnings, probe: probeInfo });
             }
 
-            if (/^\\\\/.test(file)) {
+            const onNetwork = isNetworkPath(file);
+            if (onNetwork) {
                 warnings.push({ level: 'warn', text: '输入文件位于网络共享盘：流式解码大文件可能极慢甚至挂死，强烈建议先拷贝到本地磁盘再处理。' });
             }
             const ext = path.extname(file).toLowerCase();
@@ -1762,7 +1721,7 @@ const server = http.createServer(async (req, res) => {
                     });
                 }
             }
-            if (autoStage && (/^\\\\/.test(file) || RISKY_EXTS.has(path.extname(file).toLowerCase()))) {
+            if (autoStage && (onNetwork || RISKY_EXTS.has(path.extname(file).toLowerCase()))) {
                 const free = freeBytes(CACHE_DIR) ?? freeBytes(PROJECT_ROOT);
                 if (free !== null && free < inSize * 1.1 + GB) {
                     warnings.push({
@@ -1803,23 +1762,17 @@ const server = http.createServer(async (req, res) => {
                 }
             }
             if (model === 'swiftvr') {
-                // 默认输出短边 = min(输入短边×2, 1440)；RTX 5070 Ti 稳态实测 2560×1440 约 7.1 fps
-                // （FP8 张量核计算 + 读写线程化），吞吐与输出像素数近似成反比
+                // 默认输出短边 = min(输入短边×2, 1440)；吞吐与输出像素数近似成反比，
+                // 各平台的实测标定与内存门槛见 platform.mjs 的 swiftvrPrecheck
                 const shortIn = Math.min(probeInfo.width, probeInfo.height) || 1;
                 const res = Number(body.resolution) > 0 ? Number(body.resolution) : Math.min(shortIn * 2, 1440);
                 const outMp = probeInfo.width * probeInfo.height * (res / shortIn) ** 2 / 1e6;
-                const tput = Math.min(30, 26 / Math.max(outMp, 0.1));
-                const hours = frames / tput / 3600;
+                const sw = swiftvrPrecheck(outMp, torchDevicesCache?.devices || []);
+                const hours = frames / sw.tput / 3600;
                 if (hours > 0.5) {
-                    warnings.push({ level: 'warn', text: `SwiftVR 吞吐约 ${tput.toFixed(1)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成。` });
+                    warnings.push({ level: 'warn', text: `SwiftVR 吞吐约 ${sw.tput.toFixed(1)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，${sw.gpu} 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成。` });
                 }
-                const vrams = (cudaDevicesCache?.devices || []).map((d) => d.vramGb || 0);
-                if (vrams.length > 0 && Math.max(...vrams) < 15) {
-                    warnings.push({ level: 'error', text: `SwiftVR 需要 16 GB 级显存（检测到最大 ${Math.max(...vrams).toFixed(1)} GB）：模型即使 FP8 量化也需约 5 GB 权重常驻，再加推理所需显存。请改用 nomos8k-compact 等 NCNN 引擎。` });
-                }
-                if (outMp > 4) {
-                    warnings.push({ level: 'warn', text: `输出约 ${outMp.toFixed(1)} 百万像素，超过 2K：16 GB 显存可能放不下（程序会自动减小分段重试，仍不行则报错），建议目标短边不超过 1440。` });
-                }
+                warnings.push(...sw.warnings);
             }
             return send(res, 200, { ok: true, warnings, probe: probeInfo });
         }
@@ -1906,6 +1859,11 @@ server.on('error', (err) => {
 });
 
 loadJobs();
+// 单独运行（npm run bridge / npm run dev）时：Ctrl+C 或 kill 先收掉子进程树再退出（macOS）。
+// 在 Electron 内由主进程的 before-quit 调 shutdownBridge，不注册信号处理
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    onTerminate(shutdownBridge);
+}
 if (jobOrder.length > 0) {
     // 恢复队列：上次排队中的任务自动继续；被中断的运行任务已转中止，待用户续跑/重跑
     setImmediate(runNext);

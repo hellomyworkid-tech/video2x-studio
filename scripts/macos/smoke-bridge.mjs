@@ -62,11 +62,21 @@ async function run(label, input, args, outPath, expectFrames) {
     return j.status === 'done' && okFrames;
 }
 
+// 只跑本平台已完成移植的引擎（bridge 会拒绝其余的）；旧版 bridge 不报告时全部都跑
+const supported = h.pythonEngine?.supported || ['swiftvr', 'seedvr2'];
 const outA = path.resolve(outDir, 'smoke_swiftvr.mp4');
 const outB = path.resolve(outDir, 'smoke_seedvr2.mp4');
-const a = await run('SwiftVR', inA, ['--model', 'swiftvr', '-i', path.resolve(inA), '-o', outA, '--codec', 'libx264',
-    '--crf', '18', '--device', DEVICE, '--resolution', '0', '--max-frames', '48'], outA, 48);
-const b = await run('SeedVR2 960p', inB, ['--model', 'seedvr2', '-i', path.resolve(inB), '-o', outB, '--codec', 'libx264',
-    '--crf', '18', '--device', DEVICE, '--resolution', '960', '--max-frames', '20'], outB, 20);
-console.log(a && b ? '\n全部通过' : '\n有失败项');
-process.exit(a && b ? 0 : 1);
+const results = [];
+if (supported.includes('swiftvr')) {
+    results.push(await run('SwiftVR', inA, ['--model', 'swiftvr', '-i', path.resolve(inA), '-o', outA, '--codec', 'libx264',
+        '--crf', '18', '--device', DEVICE, '--resolution', '0', '--max-frames', '48'], outA, 48));
+}
+if (supported.includes('seedvr2')) {
+    results.push(await run('SeedVR2 960p', inB, ['--model', 'seedvr2', '-i', path.resolve(inB), '-o', outB, '--codec', 'libx264',
+        '--crf', '18', '--device', DEVICE, '--resolution', '960', '--max-frames', '20'], outB, 20));
+} else {
+    console.log('\n[SeedVR2] 跳过：本平台尚未完成移植');
+}
+const ok = results.length > 0 && results.every(Boolean);
+console.log(ok ? '\n全部通过' : '\n有失败项');
+process.exit(ok ? 0 : 1);
