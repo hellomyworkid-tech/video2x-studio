@@ -93,6 +93,14 @@
 | `vendor/swiftvr/swiftvr/io.py:18` | 模块顶层 `import decord` | 不改 vendor：在 runner 导入 swiftvr 前注入空的 `decord` 模块（D7） |
 | `vendor/swiftvr/.../transformer.py:585` | 已有 `torch.backends.mps.is_available()` 分支（RoPE 用 float32） | 上游已兼容 |
 
+### D 节的实际实现（阶段 3，2026-10-09 / 10-29）
+
+- **SwiftVR：** 见 `docs/reports/macOS-SwiftVR实测报告.md`。MPS 新增 bf16 载入路径（优先官方 FP32 权重），decord 注入空模块，MPS 的 OOM（普通 RuntimeError）也走分段减半重试，水位卡在 `recommended_max_memory` 的 1.0 倍。
+- **RealBasicVSR：** `worker.py` 识别 `--device mps`，fp16 / autocast 跟随设备，显存自适应读 `recommended_max_memory`；`realbasicvsr.py` 在 MPS 上同样转 fp16（SPyNet 保持 fp32）。
+- **SeedVR2：** `seedvr2_runner.py` 允许 `mps`，注意力固定 SDPA，DiT 用 fp16 文件；显存策略在 MPS 上固定为"编解码 768 分块"，不按容量分档（理由与实测见 `docs/reports/macOS-RealBasicVSR与SeedVR2实测报告.md`）。
+- **补回 vendor 缺失文件：** `.gitignore` 的 `models/`、`data/` 两条规则没有前导 `/`，SwiftVR 的 `swiftvr/models`、SeedVR2 的 `src/models` 与 `src/data` 从未入库（Windows 本地有，所以一直能跑）。已从上游锁定版本补回，规则改为只匹配仓库根。
+- **合并分片写绝对路径：** `-o` 传相对路径时三个引擎都会在合并阶段失败（concat 按清单目录解析相对路径），与平台无关，已修。
+
 ## E. 打包与工具链（阶段 5）
 
 | 位置 | 现状 | Mac 处理 |

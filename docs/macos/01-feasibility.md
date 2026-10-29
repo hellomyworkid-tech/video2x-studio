@@ -69,6 +69,7 @@
 | `torch.mps.recommended_max_memory()` | 28.1 GB |
 | FP8（`float8_e4m3fn`） | 能拷上 MPS，但转 bf16/fp16、量化、`_scaled_mm` 全部报错（"Undefined type Float8_e4m3fn" / 未实现），即只能存不能算 |
 | SwiftVR（阶段 3 实测，详见 `docs/reports/macOS-SwiftVR实测报告.md`） | 2K 稳态 2.9～3.2 fps（Windows FP8 7.1 / bf16 5.7），960p 约 6.9 fps；画质与 Windows 参考 44.3～44.7 dB；2K 内存峰值 26～29 GB |
+| RealBasicVSR / SeedVR2（阶段 3 实测，详见 `docs/reports/macOS-RealBasicVSR与SeedVR2实测报告.md`） | RealBasicVSR 与 Windows 相当（720p 输入 4× 端到端约 1.4 fps，画质 43.4 dB）；SeedVR2 960p 约 0.22 fps（Windows 0.55），画质 39.0 dB，载入时内存瞬时峰值约 30 GB |
 | ncnn（MoltenVK）Real-ESRGAN animevideov3，854×480→2× | 稳态约 13 fps（去掉编码也一样），启动约 1 s。ncnn 报 `fp16-cm=0`：没有 cooperative matrix，卷积只能走普通着色器 |
 
 与上面预期不同的地方：

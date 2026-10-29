@@ -92,13 +92,13 @@ Windows 参考输出在 `testdata/reference-windows/`，确切命令见同目录
 
 ## 阶段 3：PyTorch 引擎（MPS）
 
-- [ ] `B_realbasicvsr` 达标
+- [x] `B_realbasicvsr` 达标——43.36 dB；总耗时 38 s（Windows 39 s）
 - [x] `B_swiftvr`、`A_swiftvr_2k`（统一内存允许的话）达标；`A20.mp4`（480 帧、两个宏分片）帧数为 480，分片边界无跳帧——44.66 / 44.26 dB；A20 480 帧，第 240 帧前后连续
-- [ ] `B_seedvr2_960` 达标（fp16 DiT）
+- [x] `B_seedvr2_960` 达标（fp16 DiT）——39.03 dB；327 s（Windows 164 s），进程内存峰值约 31 GB
 - [x] 断点续跑：运行中 `kill -9` worker，重新提交后从检查点继续，最终帧数正确——SwiftVR 实测，结果与不中断运行逐位相同
 - [x] OOM / 内存上限：用超大 `--clip-len` 触发，能按 4 的倍数递减重试并完成，不会陷入换页——SwiftVR 2K `--clip-len 24` → 12 → 8 完成
-- [x] 日志里没有 MPS 回退 CPU 的警告；如有，记录是哪个算子——SwiftVR 无回退；仅有"超过 3 维的常数填充走 View Ops 实现"的警告（仍在 GPU 上）
-- [ ] 把 Mac 实测的速度、内存峰值写进 `docs/reports/`（与 Windows 数据并列），并更新界面说明与预检估算——SwiftVR 已写入 `docs/reports/macOS-SwiftVR实测报告.md`；界面说明与预检估算待阶段 2
+- [x] 日志里没有 MPS 回退 CPU 的警告；如有，记录是哪个算子——三个引擎均无回退；SwiftVR 仅有"超过 3 维的常数填充走 View Ops 实现"的警告（仍在 GPU 上）
+- [x] 把 Mac 实测的速度、内存峰值写进 `docs/reports/`（与 Windows 数据并列），并更新界面说明与预检估算——`macOS-SwiftVR实测报告.md`、`macOS-RealBasicVSR与SeedVR2实测报告.md`；预检按平台标定（`platform.mjs` 的 `PERF`），界面说明含 Mac 实测数据
 
 ## 阶段 4：Anime4K / HDR
 
