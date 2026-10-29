@@ -14,6 +14,33 @@ extern "C" {
 namespace video2x {
 namespace encoder {
 
+// HDR output needs 10-bit 4:2:0. Software encoders (libx265, libaom-av1, libvpx-vp9) take
+// planar yuv420p10le, hardware HEVC encoders (hevc_videotoolbox, hevc_nvenc, hevc_amf) only
+// take semi-planar p010le. Encoders with neither keep yuv420p10le and fail in avcodec_open2.
+static AVPixelFormat hdr_pix_fmt(const AVCodec* encoder) {
+    const AVPixelFormat* fmts = nullptr;
+#if LIBAVCODEC_BUILD >= AV_VERSION_INT(61, 13, 100)
+    if (avcodec_get_supported_config(
+            nullptr, encoder, AV_CODEC_CONFIG_PIX_FORMAT, 0, (const void**)&fmts, nullptr
+        ) < 0) {
+        fmts = nullptr;
+    }
+#else
+    fmts = encoder->pix_fmts;
+#endif
+    if (fmts == nullptr) {
+        return AV_PIX_FMT_YUV420P10LE;
+    }
+    bool has_p010 = false;
+    for (const AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++) {
+        if (*p == AV_PIX_FMT_YUV420P10LE) {
+            return AV_PIX_FMT_YUV420P10LE;
+        }
+        has_p010 = has_p010 || *p == AV_PIX_FMT_P010LE;
+    }
+    return has_p010 ? AV_PIX_FMT_P010LE : AV_PIX_FMT_YUV420P10LE;
+}
+
 Encoder::Encoder()
     : ofmt_ctx_(nullptr), enc_ctx_(nullptr), out_vstream_idx_(-1), stream_map_(nullptr) {}
 
@@ -118,11 +145,15 @@ int Encoder::init(
 
     // Set the pixel format
     if (enc_cfg.is_hdr) {
-        enc_ctx_->pix_fmt = AV_PIX_FMT_YUV420P10LE;
+        enc_ctx_->pix_fmt = hdr_pix_fmt(encoder);
         enc_ctx_->color_primaries = AVCOL_PRI_BT2020;
         enc_ctx_->color_trc = (enc_cfg.hdr_format == "hlg") ? AVCOL_TRC_ARIB_STD_B67 : AVCOL_TRC_SMPTE2084;
         enc_ctx_->colorspace = AVCOL_SPC_BT2020_NCL;
-        logger()->info("Configured 10-bit HDR encoder settings: BT.2020 / {}", enc_cfg.hdr_format);
+        logger()->info(
+            "Configured 10-bit HDR encoder settings: BT.2020 / {} ({})",
+            enc_cfg.hdr_format,
+            av_get_pix_fmt_name(enc_ctx_->pix_fmt)
+        );
     } else if (enc_cfg.pix_fmt != AV_PIX_FMT_NONE) {
         // Use the specified pixel format
         enc_ctx_->pix_fmt = enc_cfg.pix_fmt;

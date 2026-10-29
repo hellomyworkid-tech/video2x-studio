@@ -103,7 +103,7 @@ export default function EnhanceSection({ req, onChange, bare }: Props) {
                     </div>
                     {e.hdr && (
                         <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-200/90">
-                            将自动切换 libx265 编码并写入 BT.2020 + mastering display 元数据
+                            输出 10bit 并写入 BT.2020 + mastering display 元数据；选 libx264 时自动换成 libx265（libx264 只有 8bit）
                         </p>
                     )}
                 </EnhCard>
