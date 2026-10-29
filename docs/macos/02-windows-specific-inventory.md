@@ -115,6 +115,23 @@
 | `engine-python/python/`（嵌入式 CPython，不在 git 里） | Windows embeddable + pip 安装的依赖 | 依赖清单见 `engine-python/requirements-macos.txt`；Windows 实际环境锁定在 `requirements-windows-lock.txt` |
 | `engine-python/swiftvr-libs/`（不在 git 里） | `pip --target` 装的 diffusers 0.36 + decord（Windows 二进制） | Mac 只装 `diffusers==0.36.0`（decord 走 D7） |
 
+### E 节的实际实现（阶段 5，2026-10-29）
+
+- **extraFiles 分平台：** 原来顶层的 `extraFiles` 逐项原样搬进 `build.win`。electron-builder 会把顶层与平台段合并，放在顶层的话，Mac 打包也会把 Windows 的 `engine-python` 规则（含 SeedVR2 FP8）一起拷进去。`build.mac` 另列 Mac 的条目。`check-dist.mjs` 读"顶层 + 当前平台段"。
+- **包内布局：** 文件放在 `.app/Contents/` 下，相对路径与项目根相同（`build-macos/`、`third_party/ffmpeg-macos/`、`models/`、`engine-python/`）。bridge 的 `findProjectRoot` 从 `Contents/MacOS` 向上找到 `Contents`，bridge、worker、核心都不用改路径逻辑。
+- **动态库：** 由 `scripts/macos/package-app.mjs pre` 处理：
+  - 从 `video2x`、`libvideo2x.dylib`、`ffmpeg`、`ffprobe` 出发，按 `otool -l` 递归收集非系统库（34 个），统一放进 `build-macos/lib`。
+  - 引用与 install name 改成 `@rpath/<名>`，rpath 改成包内相对路径，改完逐个重新 ad-hoc 签名。
+  - 同一个库经不同路径引用（opt 与 Cellar）时只收一份。
+- **Vulkan：** 包内放一份 MoltenVK 的 ICD 清单，`library_path` 指向 `build-macos/lib/libMoltenVK.dylib`。`childEnv` 在有这份清单时设 `VK_DRIVER_FILES`。
+  - **实测：** 不设时 ncnn 自带的简易 loader 会去 Homebrew 目录找 ICD。在屏蔽 `/opt/homebrew` 的沙箱里报 `vkCreateInstance failed -9` 后段错误（退出码 139）；设了之后四个 ncnn 引擎都与参考输出一致。
+- **缓存目录：** `platform.mjs` 新增 `cacheDir()`，项目根在 `.app/Contents` 时，任务记录、日志、本地暂存放 `~/Library/Application Support/Video2X Studio/cache`。原因有两个：签名封存后包内不能写；从"下载"直接打开时，系统会把 App 挪到只读路径运行（App Translocation）。可用 `VIDEO2X_CACHE_DIR` 覆盖。
+- **Python：**
+  - 用 python-build-standalone 3.12.16。版本锁定在新增的 `engine-python/requirements-macos-lock.txt`，即开发环境 `.venv` 通过参考比对后的 pip freeze，用 `--no-deps` 安装。
+  - post 阶段在包内用 `unchecked-hash` 预编译全部 .pyc，子进程设 `PYTHONDONTWRITEBYTECODE=1`。
+- **图标：** `ui/build/` 被 .gitignore 忽略，Windows 的 `icon.ico` 与 `gen_icon.py` 不在仓库里。脚本用 `packaging/appimage/video2x.png`（256 px）生成 `icon.icns`，大尺寸是放大的，有 1024 px 原图时放到 `ui/build/icon.icns` 即可替换。
+- **签名：** `mac.identity: null` 让 electron-builder 跳过签名，最后由 post 阶段对整个 App 做 ad-hoc 签名。`codesign --verify --deep --strict` 通过。
+
 ## F. 文档
 
 | 位置 | 处理 |

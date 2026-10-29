@@ -170,3 +170,46 @@ npm run dev        # 或开发模式：bridge + vite（浏览器打开 http://lo
 - 验收脚本（另起一个 7299 端口的 bridge，测完关掉）：
   `BRIDGE_PORT=7299 node server/bridge.mjs &`，然后 `node scripts/macos/accept-bridge.mjs <输出目录>`。
   测试 bridge 与正式程序共用 `cache/jobs.json`，测试期间不要同时开着桌面程序。
+
+## 9. 打包成 .app（阶段 5）
+
+```bash
+cd ui
+npm run dist:mac
+# 国内网络：VIDEO2X_CN=1 ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run dist:mac
+```
+
+产物：`ui/release/mac-arm64/Video2X Studio.app`，约 14 GB，模型与权重都在包里，双击即可用。
+
+流程：`scripts/macos/package-app.mjs` 与 `ui/scripts/check-dist.mjs` 依次做下面几步。
+
+1. **pre：** 在 `dist-macos/`（已忽略）准备包内文件：
+   - C++ 核心与 FFmpeg 命令行，连同 34 个 Homebrew 动态库，收进 `build-macos/lib`，引用改成 `@rpath`，再重新 ad-hoc 签名。
+   - MoltenVK 的 ICD 清单。
+   - 随包 Python：python-build-standalone 3.12.16，核对官方 SHA-256，按 `engine-python/requirements-macos-lock.txt` 安装。首次约 15 分钟，主要是 pip 下载约 1 GB 依赖；之后复用。
+   - App 图标。
+2. **check-dist pre：** 关键文件齐全，C++ 产物不旧于源码。
+3. **electron-builder --mac dir：** 按 `package.json` 的 `mac.extraFiles` 拷进 `.app/Contents`，布局与项目根相同。
+   - 只带 Mac 用的权重：SeedVR2 fp16、SwiftVR FP8。
+   - 不带 SwiftVR 官方 FP32 和 SeedVR2 FP8，这两个合计 21.8 GB。
+4. **post：**
+   - 在包内预编译 .pyc（unchecked-hash）。
+   - 检查所有 Mach-O 都不引用包外的库。
+   - 整体 ad-hoc 签名，并用 `codesign --verify --deep --strict` 校验。
+5. **check-dist post：** 关键文件与源文件大小一致，不该带的大文件不在包里。
+
+Python 运行时首次准备好之后，重新打包约 1 分钟。
+
+运行时与开发环境的差异（`ui/server/platform.mjs`）：
+
+- **缓存目录：** 包内按只读对待，任务记录、日志、本地暂存放在 `~/Library/Application Support/Video2X Studio/cache`。开发环境仍是项目根下的 `cache/`。
+- **`VK_DRIVER_FILES`：** 子进程都设这个变量，指向包内的 ICD 清单。
+  - libplacebo 经 vulkan-loader，ncnn 经自带的简易 loader，都靠它找到包内的 MoltenVK。
+  - 不设的话，ncnn 会去 Homebrew 目录找；没装 Homebrew 的机器上会报 `vkCreateInstance failed -9`，然后崩溃。
+- **`PYTHONDONTWRITEBYTECODE=1`：** 子进程都设，Python 不往包内写 `__pycache__`。
+
+使用注意：
+
+- **首次运行等待：** 系统的 XProtect 会扫描包内程序，第一个任务要多等约 30 秒，只有第一次。
+- **拷到别的 Mac：** 自用 ad-hoc 签名，没有公证。拷过去后先清除隔离属性：`xattr -dr com.apple.quarantine "/Applications/Video2X Studio.app"`。
+- **不要与开发版桌面程序同时开：** 两者都用 7199 端口，后开的会直接复用先开的那个服务。

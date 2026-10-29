@@ -145,6 +145,7 @@
   - 打开文件夹、选文件对话框
   - 网络路径判断（Windows 的 UNC，对应 Mac 上 `/Volumes/` 下的 smbfs / nfs / afpfs 挂载）
 - **D10 打包：** electron-builder 新增 `mac` 段，target `dir`。`check-dist.mjs` 的关键文件表按平台分开。自用 ad-hoc 签名（`codesign -s -`）。
+  - **阶段 5 结论：** 按此实现（`npm run dist:mac`，做法见 03-setup.md §9、02 文档 E 节）。随包 Python 用 python-build-standalone 3.12.16；SwiftVR 只带 FP8 文件（与 Windows 便携包相同），App 约 14 GB。
 
 ## 5. 分阶段路线
 

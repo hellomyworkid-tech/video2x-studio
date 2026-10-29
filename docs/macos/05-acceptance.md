@@ -113,9 +113,18 @@ Windows 参考输出在 `testdata/reference-windows/`，确切命令见同目录
 
 ## 阶段 5：打包
 
-- [ ] `npm run dist:mac` 通过 `check-dist`（Mac 关键文件表）
-- [ ] 拷到另一个用户账户或另一台 Mac：清除隔离属性后首次启动即可用，ncnn 与 PyTorch 引擎都能出片
-- [ ] 包内不依赖 Homebrew：临时把 `/opt/homebrew` 改名后运行验证；或用 `otool -L` 检查所有 dylib 都指向包内
+做法见 03-setup.md §9。产物 `ui/release/mac-arm64/Video2X Studio.app`，约 14 GB（权重 12 GB、Python 1.2 GB、Electron 0.3 GB、模型 0.25 GB、核心与动态库 67 MB）。
+
+- [x] `npm run dist:mac` 通过 `check-dist`（Mac 关键文件表）——22 项关键文件、5 个模型目录齐全，大小与源文件一致；`codesign --verify --deep --strict` 通过；Python 运行时准备好后重新打包约 1 分钟
+- [ ] 拷到另一个用户账户或另一台 Mac：清除隔离属性后首次启动即可用，ncnn 与 PyTorch 引擎都能出片——**待你实测**。已用替代方法验证（见下一项）：把 App 克隆到仓库外的目录运行，路径无关
+- [x] 包内不依赖 Homebrew——没有改名 `/opt/homebrew`，改用 `sandbox-exec` 屏蔽 `/opt/homebrew`、`/usr/local` 与整个仓库（只放行 `testdata`），在仓库外的副本上运行：
+  - 13 项参考输出全部达标，数值与开发环境一致。SwiftVR 只带 FP8 文件，比开发环境（FP32 源）更接近 Windows 参考：B 44.78 dB、2K 44.33 dB。
+  - 包内 bridge（`ELECTRON_RUN_AS_NODE`）经 `accept-bridge.mjs` 验收 24 项全部通过。跑完后 `codesign --verify` 仍然通过，说明运行期没有写入包内。
+  - post 阶段扫描 257 个 Mach-O，没有引用包外的动态库。
+  - 正常启动的桌面窗口里跑 SwiftVR，worker 映射的 49 个动态库全部来自包内。
+- 实测注意：
+  - 首次运行包内程序时，XProtect 会扫描，第一个任务多等约 30 秒。
+  - Electron 窗口不能在 `sandbox-exec` 里启动，Chromium 子进程要建自己的沙箱，不能嵌套，所以图形界面是正常启动验证的。
 
 ## 阶段 6：文档
 
