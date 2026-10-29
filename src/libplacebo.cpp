@@ -29,6 +29,13 @@ int init_libplacebo(
 
     // Create the Vulkan hardware device context
     AVBufferRef* vk_hw_device_ctx = nullptr;
+#ifdef __APPLE__
+    // macOS (MoltenVK): leave hw_device_ctx unset so the libplacebo filter creates its own
+    // Vulkan device. An imported FFmpeg device spreads graphics/compute/transfer over separate
+    // queue families, and the cross-queue sync over Metal corrupts random frames. Apple Silicon
+    // has a single GPU, so there is no device to select.
+    (void)vk_device_index;
+#else
     ret = av_hwdevice_ctx_create(
         &vk_hw_device_ctx,
         AV_HWDEVICE_TYPE_VULKAN,
@@ -40,6 +47,7 @@ int init_libplacebo(
         logger()->error("Failed to create Vulkan hardware device context for libplacebo.");
         vk_hw_device_ctx = nullptr;
     }
+#endif
 
     AVFilterGraph* graph = avfilter_graph_alloc();
     if (!graph) {

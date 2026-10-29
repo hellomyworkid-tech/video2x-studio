@@ -73,6 +73,12 @@ int FilterHDR::build_graph(const AVFrame* ref_frame) {
 
     // Create the Vulkan hardware device context for the libplacebo filter
     AVBufferRef* vk_hw_device_ctx = nullptr;
+#ifdef __APPLE__
+    // macOS (MoltenVK): let the libplacebo filter create its own Vulkan device, same as
+    // init_libplacebo (an imported FFmpeg device corrupts random frames on Metal)
+    (void)vk_device_index_;
+    int ret = 0;
+#else
     int ret = av_hwdevice_ctx_create(
         &vk_hw_device_ctx, AV_HWDEVICE_TYPE_VULKAN, std::to_string(vk_device_index_).c_str(),
         nullptr, 0
@@ -82,6 +88,7 @@ int FilterHDR::build_graph(const AVFrame* ref_frame) {
         logger()->error("Failed to create Vulkan device for HDR filter: {}", errbuf);
         return ret;
     }
+#endif
 
     filter_graph_ = avfilter_graph_alloc();
     if (!filter_graph_) {
@@ -188,8 +195,10 @@ int FilterHDR::build_graph(const AVFrame* ref_frame) {
         av_buffer_unref(&vk_hw_device_ctx);
         return ret;
     }
-    libplacebo_ctx->hw_device_ctx = av_buffer_ref(vk_hw_device_ctx);
-    av_buffer_unref(&vk_hw_device_ctx);
+    if (vk_hw_device_ctx != nullptr) {
+        libplacebo_ctx->hw_device_ctx = av_buffer_ref(vk_hw_device_ctx);
+        av_buffer_unref(&vk_hw_device_ctx);
+    }
 
     // NOTE: no explicit hwdownload stage. The libplacebo filter declares both Vulkan and
     // software (user-requested `format`) outputs; linking it straight to the buffersink
