@@ -56,12 +56,21 @@ brew install cmake ninja pkgconf git \
              python@3.12 node
 ```
 
-- `ffmpeg@7`（7.1.x）是 keg-only，不会进 PATH。构建与运行时要显式指过去：
-  - 构建：`PKG_CONFIG_PATH="$(brew --prefix ffmpeg@7)/lib/pkgconfig"`
-  - 运行：`VIDEO2X_FFMPEG_DIR="$(brew --prefix ffmpeg@7)/bin"`（bridge / worker 移植后读取这个变量）
 - 不要装普通的 `ffmpeg` 去替代：9.0 版没有 libvidstab，防抖不可用。
-- Anime4K / HDR 需要带 Vulkan + libplacebo 的 FFmpeg，放到阶段 4 处理（见 01 文档 D1）。
 - `vulkan-tools` 提供 `vulkaninfo`，用来确认 MoltenVK 能看到 GPU：`vulkaninfo --summary`。
+
+### 2.1 自编 FFmpeg 7.1.5（Anime4K / HDR 需要）
+
+Homebrew 的 `ffmpeg@7` 没有 libplacebo 滤镜，Anime4K 与 SDR 转 HDR 用不了。用脚本自编一份同版本的：
+
+```bash
+bash scripts/macos/build-ffmpeg.sh      # 产物：third_party/ffmpeg-macos（约 23 MB，已被 .gitignore 忽略）
+```
+
+- 源码取 FFmpeg 官方 GitHub 仓库的 `n7.1.5` 标签（ffmpeg.org 在国内连不上），下载后核对 SHA-256；缺的 Homebrew 依赖（libplacebo、x264、x265 等）脚本会自动装。
+- M5 Max 上编译约 1 分钟，国内下载源码约 1.5 分钟。已装好时直接跳过，`--force` 强制重编。`bootstrap.sh` 已包含这一步。
+- 装好后，`build-core.sh`、bridge、worker 都优先用它；没有时退回 `ffmpeg@7`（其余功能正常，只是界面把 Anime4K 与 HDR 置灰）。`ffmpeg@7` 仍要装，作后备，`compare.sh` 也用它。
+- 可用 `VIDEO2X_FFMPEG_DIR` 指定别的 FFmpeg 目录（bridge 会把同一路径传给 Python 引擎）。核心链接的 FFmpeg 必须与它一致，`doctor.sh` 会检查。
 
 ## 3. Python 环境
 
@@ -144,6 +153,8 @@ bash scripts/macos/build-core.sh        # 产物：build-macos/video2x、build-m
 
 详见 02 文档 A 节的"实测"说明。
 
+脚本优先链接 `third_party/ffmpeg-macos`（见 §2.1），没有时用 `ffmpeg@7`。换了 FFmpeg 后再运行，脚本会发现 CMake 缓存里的 FFmpeg 路径不同，自动 `--fresh` 重新配置。
+
 ## 8. 运行界面（阶段 2）
 
 ```bash
@@ -153,7 +164,7 @@ npm run desktop    # 桌面窗口：Electron 内启动 bridge（127.0.0.1:7199�
 npm run dev        # 或开发模式：bridge + vite（浏览器打开 http://localhost:3000）
 ```
 
-- ffmpeg 默认用 `/opt/homebrew/opt/ffmpeg@7/bin`，可用 `VIDEO2X_FFMPEG_DIR` 覆盖；bridge 会把同一路径传给 Python 引擎。
+- ffmpeg 默认用 `third_party/ffmpeg-macos/bin`，没有时用 `/opt/homebrew/opt/ffmpeg@7/bin`；可用 `VIDEO2X_FFMPEG_DIR` 覆盖，bridge 会把同一路径传给 Python 引擎。界面按这份 ffmpeg 是否带 libplacebo 决定 Anime4K 与 HDR 是否可选。
 - 桌面窗口里的"添加视频""选择输出目录"用 macOS 原生对话框；浏览器开发模式下由 bridge 调 osascript 弹出，对话框可能出现在浏览器窗口后面。
 - 第一次读写桌面、文稿、下载、网络盘等位置时，系统会弹窗请求授权（隐私与安全性），允许即可。
 - 验收脚本（另起一个 7299 端口的 bridge，测完关掉）：

@@ -14,8 +14,12 @@
 配套脚本在 `scripts/macos/`：
 
 - `doctor.sh`：只读体检（芯片/内存/系统、Homebrew 依赖、FFmpeg 滤镜、Vulkan/MoltenVK、PyTorch MPS 冒烟、权重是否就位）。
-- `bootstrap.sh`：按 03-setup.md 安装依赖、建 Python 虚拟环境、装 npm 依赖（幂等，可重复跑）。
+- `bootstrap.sh`：按 03-setup.md 安装依赖、自编 FFmpeg、建 Python 虚拟环境、装 npm 依赖（幂等，可重复跑）。
+- `build-ffmpeg.sh`：自编带 libplacebo 的 FFmpeg 7.1.5 到 `third_party/ffmpeg-macos`（Anime4K / HDR 需要）。
+- `build-core.sh`：编译 C++ 核心到 `build-macos/`。
+- `run-reference.sh`：用 Windows 参考命令在 Mac 上重跑，输出到 `testdata/mac/`。
 - `compare.sh`：把 Mac 输出与 Windows 参考输出逐帧比 PSNR。
+- `accept-bridge.mjs`：经 bridge 的 HTTP 接口做阶段 2 / 4 验收。
 
 > 这些脚本是在 Windows 上写的，**没有在 Mac 上实际跑过**。第一次运行时请 Claude Code
 > 边跑边修，修好后提交。

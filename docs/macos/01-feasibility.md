@@ -110,6 +110,7 @@
   - 先用 `ffmpeg@7`。它和 Windows 的 7.1 是同一 API 代，C++ 核心不用适配新 API，而且自带 vidstab。
   - Anime4K/HDR 暂时在 Mac 上隐藏。
   - 阶段 4 再二选一：自编 FFmpeg 7.1（`--enable-vulkan --enable-libplacebo --enable-libvidstab`，链接 Homebrew 的 libplacebo / vulkan-loader / molten-vk），或把核心迁到 FFmpeg 9 后用 `ffmpeg-full`。
+  - **阶段 4 结论：** 选了自编 FFmpeg 7.1.5（`scripts/macos/build-ffmpeg.sh`，装到 `third_party/ffmpeg-macos`），与 Windows 同一 API 代，核心不用适配。实测见 `docs/reports/macOS-Anime4K与HDR实测报告.md`。
 - **D2 ncnn：** `-DVIDEO2X_USE_EXTERNAL_NCNN=ON` 用 Homebrew ncnn。不行再从源码编，并打开 `-DNCNN_VULKAN=ON`；必要时用 `USE_STATIC_MOLTENVK`。
 - **D3 spdlog / Boost：** `-DVIDEO2X_USE_EXTERNAL_SPDLOG=ON -DVIDEO2X_USE_EXTERNAL_BOOST=ON`，用 Homebrew 版。
 - **D4 Python：**

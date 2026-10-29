@@ -102,8 +102,14 @@ Windows 参考输出在 `testdata/reference-windows/`，确切命令见同目录
 
 ## 阶段 4：Anime4K / HDR
 
-- [ ] `B_anime4k_a` 达标
-- [ ] `--hdr` 输出带正确的 HDR 元数据（`ffprobe` 能看到 `color_transfer=smpte2084` 或 `arib-std-b67`）
+用 `scripts/macos/build-ffmpeg.sh` 自编的 FFmpeg 7.1.5（带 libplacebo）。实测见 `docs/reports/macOS-Anime4K与HDR实测报告.md`。
+
+- [x] `B_anime4k_a` 达标——47.54 dB，最低帧 46.48 dB；连续 15 次无坏帧（修了 MoltenVK 上的随机花屏），7 个着色器都能跑
+- [x] `--hdr` 输出带正确的 HDR 元数据——PQ 为 `smpte2084`，HLG 为 `arib-std-b67`；都是 BT.2020、Main 10，带 mastering display 与 CLL；libx265 与 hevc_videotoolbox 都能用（顺带修了 HLG 与硬件编码器两个跨平台问题）
+- [x] 换 FFmpeg 后重跑全部 13 项参考输出，全部达标，数值与之前一致
+- [x] 界面放开 Anime4K 与 HDR——`/api/health` 报 `libplacebo: true`；`accept-bridge.mjs` 第 [6] 节经 bridge 跑通 Anime4K、HDR PQ（libx264 自动换成 libx265）、HDR HLG（hevc_videotoolbox）；桌面程序里 libplacebo 卡片与 HDR 开关可用
+
+已知限制（与 Windows 相同）：FFmpeg 7.1 的 libplacebo 滤镜没有 `target_peak`，`--hdr-peak` 只写进元数据，不控制实际峰值。
 
 ## 阶段 5：打包
 

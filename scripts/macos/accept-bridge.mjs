@@ -1,4 +1,4 @@
-// 阶段 2 验收（docs/macos/05-acceptance.md）：经与界面相同的 HTTP 接口逐项验证 bridge 在 macOS 上的行为。
+// 阶段 2 / 4 验收（docs/macos/05-acceptance.md）：经与界面相同的 HTTP 接口逐项验证 bridge 在 macOS 上的行为。
 //
 // 用法（先另起一个 bridge，端口与正在使用的程序错开，测完记得关掉）：
 //   BRIDGE_PORT=7299 node ui/server/bridge.mjs &
@@ -187,8 +187,41 @@ console.log('\n[5] 打开所在文件夹 / 日志目录（接口层；访达是�
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n[6] Anime4K 与 SDR 转 HDR（阶段 4：自编 FFmpeg 带 libplacebo）');
+check('health 报告 libplacebo 可用', h.features?.libplacebo === true, String(h.features?.libplacebo));
+{
+    const out = path.join(outDir, 'anime4k.mp4');
+    fs.rmSync(out, { force: true });
+    const [j0] = await submit([cli(out, ['-p', 'libplacebo', '--libplacebo-shader', 'anime4k-v4-a',
+        '-w', '1708', '-h', '960', '-d', '-1'])]);
+    const { j, secs } = await waitDone(j0.id);
+    const f = frames(out);
+    check(`Anime4K（${secs.toFixed(0)}s）`, j.status === 'done' && f === '1708,960,72', `${j.status}，输出 ${f}${j.error ? `，${j.error}` : ''}`);
+}
+// 界面默认编码器 libx264 加 HDR 会自动换成 libx265；苹果硬编走 p010le
+for (const [fmt, codec, enc, trc] of [
+    ['pq', 'libx264', ['-e', 'crf=18'], 'smpte2084'],
+    ['hlg', 'hevc_videotoolbox', ['-e', 'flags=+qscale', '-e', `global_quality=${79 * 118}`], 'arib-std-b67'],
+]) {
+    const out = path.join(outDir, `hdr_${fmt}.mp4`);
+    fs.rmSync(out, { force: true });
+    const [j0] = await submit([{ file: IN_B, outPath: out, engine: 'cli', autoStage: false,
+        args: ['-i', IN_B, '-o', out, '-p', 'lanczos', '-s', '2', '--hdr', '--hdr-format', fmt, '--hdr-peak', '1000',
+            '-c', codec, ...enc] }]);
+    const { j, secs } = await waitDone(j0.id);
+    let info = '无输出';
+    try {
+        info = execFileSync(FFPROBE, ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
+            'stream=codec_name,profile,pix_fmt,color_transfer,color_primaries', '-of', 'csv=p=0', out])
+            .toString().trim().replace(/,+$/, '');  // 带 side data 的流行尾会多一个逗号
+    } catch { /* 留给 check 报告 */ }
+    check(`HDR ${fmt.toUpperCase()} + ${codec}（${secs.toFixed(0)}s）`,
+        j.status === 'done' && info === `hevc,Main 10,yuv420p10le,${trc},bt2020`, `${j.status}，${info}${j.error ? `，${j.error}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
 if (process.env.SKIP_SLOW !== '1') {
-    console.log('\n[6] SwiftVR：检查点暂停（退出码 4）→ 续跑，帧数正确');
+    console.log('\n[7] SwiftVR：检查点暂停（退出码 4）→ 续跑，帧数正确');
     const out = path.join(outDir, 'swiftvr_pause.mp4');
     for (const f of fs.readdirSync(outDir)) if (f.startsWith('swiftvr_pause')) fs.rmSync(path.join(outDir, f));
     const args = ['--model', 'swiftvr', '-i', IN_A20, '-o', out, '--codec', 'libx264', '--crf', '18',
