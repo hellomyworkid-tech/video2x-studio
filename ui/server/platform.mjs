@@ -318,9 +318,30 @@ export const TORCH_DEVICES_PY = IS_MAC
  *  两套枚举的设备名未必一致，直接归到同一个键，保证两种引擎串行；null 表示按设备名区分（Windows 多卡） */
 export const SHARED_GPU_KEY = IS_MAC ? 'Apple GPU#0' : null;
 
-/** 本平台已完成移植的 PyTorch 引擎。macOS 上 RealBasicVSR / SeedVR2 的 MPS 适配尚未完成（阶段 3），
- *  在此之前界面禁用它们：worker 对非 CUDA 设备会静默回退 CPU（RealBasicVSR，极慢）或直接报错（SeedVR2） */
-export const PY_ENGINES = IS_MAC ? ['swiftvr'] : ['realbasicvsr', 'seedvr2', 'swiftvr'];
+/** 本平台已完成移植的 PyTorch 引擎（未列出的在界面上禁用、提交时拒绝）。三个引擎都已支持 MPS（阶段 3） */
+export const PY_ENGINES = ['realbasicvsr', 'seedvr2', 'swiftvr'];
+
+/** 预检耗时估算的测试平台与吞吐标定：吞吐 ≈ k / 输出百万像素。
+ *  RealBasicVSR 两边实测相近（720p 输入 4×：RTX 5070 Ti 1.4 fps、M5 Max 1.44 fps），沿用同一组数字；
+ *  SeedVR2：RTX 5070 Ti 960p 0.47 fps、2K 0.25 fps；M5 Max 960p（1.64 MP）0.22 fps */
+export const PERF = IS_MAC
+    ? { gpu: 'M5 Max', seedvr2K: 0.36, swiftvrK: 11.3 }
+    : { gpu: 'RTX 5070 Ti', seedvr2K: 0.9, swiftvrK: 26 };
+
+/** SeedVR2 在 Mac 上的提示。DiT 载入时 CPU 上有 fp16→bf16 转换副本，M5 Max 36 GB 实测瞬时峰值约 31 GB
+ *  （960p 与 2K 输出相同）；实测到 2K 输出（2560×1440 约 0.1 fps），更大的输出未验证 */
+export function seedvr2MemoryWarnings(torchDevices, outMp) {
+    if (!IS_MAC) return [];
+    const warnings = [];
+    const mem = Math.max(0, ...torchDevices.map((d) => d.vramGb || 0));
+    if (mem > 0 && mem < 24) {
+        warnings.push({ level: 'warn', text: `SeedVR2 在 Mac 上载入模型时内存峰值约 31 GB（M5 Max 36 GB 实测），本机 GPU 可用上限 ${mem.toFixed(1)} GB，可能大量换页、极慢甚至失败。建议改用 SwiftVR。` });
+    }
+    if (outMp > 3.7) {
+        warnings.push({ level: 'warn', text: `输出约 ${outMp.toFixed(1)} 百万像素，超过 2K：Mac 上 SeedVR2 只验证到 2K 输出（2560×1440 约 0.1 fps），更大的输出可能放不下且极慢。建议在处理器选项里把目标短边设为 960～1440。` });
+    }
+    return warnings;
+}
 
 /** SeedVR2 DiT 权重：MPS 不支持 FP8 张量，Mac 用官方 fp16 版（D6） */
 export const SEEDVR2_DIT = IS_MAC
@@ -340,9 +361,9 @@ export const SEEDVR2_DIT = IS_MAC
 /** SwiftVR 预检：吞吐 ≈ k / 输出百万像素（实测标定），以及内存门槛提示 */
 export function swiftvrPrecheck(outMp, torchDevices) {
     const warnings = [];
-    const k = IS_MAC ? 11.3 : 26;              // M5 Max：2K 3.1 fps、960p 6.9 fps；RTX 5070 Ti：2K 7.1 fps
-    const tput = Math.min(30, k / Math.max(outMp, 0.1));
-    const gpu = IS_MAC ? 'M5 Max' : 'RTX 5070 Ti';
+    // M5 Max：2K 3.1 fps、960p 6.9 fps；RTX 5070 Ti：2K 7.1 fps
+    const tput = Math.min(30, PERF.swiftvrK / Math.max(outMp, 0.1));
+    const { gpu } = PERF;
     const mems = torchDevices.map((d) => d.vramGb || 0);
     const maxMem = mems.length > 0 ? Math.max(...mems) : 0;
     if (IS_MAC) {

@@ -379,7 +379,9 @@ export default function ProcessorSection({ req, onChange, bare, unavailable = {}
                             </Select>
                         </div>
                         <div className="flex h-9 items-center rounded-md border border-border/60 bg-secondary/30 px-3 text-[11px] text-muted-foreground">
-                            断点续跑 · BlockSwap + VAE tiling 按显存自动分档（≥8GB 可跑）
+                            {isMac()
+                                ? '断点续跑 · fp16 权重 · VAE 固定 768 分块 · 建议 36GB 以上统一内存'
+                                : '断点续跑 · BlockSwap + VAE tiling 按显存自动分档（≥8GB 可跑）'}
                         </div>
                     </div>
                 )}
@@ -416,9 +418,11 @@ export default function ProcessorSection({ req, onChange, bare, unavailable = {}
                     {p.kind === 'rife' && '补帧不改变分辨率；场景切换阈值越低检测越敏感（20 表示 20% 差异即判定切换），避免转场处产生伪影。可与 HDR 同用。'}
                     {p.kind === 'span' && 'SPAN 仅支持 2× / 4×，模型体积最小、速度快（720p 输入实测约 12 fps）。它是效率竞赛（NTIRE）出身的保真型模型：只做忠实放大、几乎不"再生"细节，因此不会有塑料感与振铃，但观感也偏软——头发、织物等高频区域可能糊成块状。合成退化的保真度测试里它得分最高，但那类测试恰好偏袒它这种训练方式；真实素材上不少人觉得不如 Real-ESRGAN 好看。建议在自己的片段上和 Real-ESRGAN 对比后再定。'}
                     {p.kind === 'realbasicvsr' && 'RealBasicVSR（Apache-2.0）通过双向循环传播 + SPyNet 光流对齐消除帧间闪烁，时序一致性好。但代价很高：720×1280 输入端到端实测约 1.4 fps，约为 Real-ESRGAN 4× 的 1/6、SPAN 2× 的 1/8。显存够时走整帧推理（画质最佳）；输入过大放不下会自动退化为空间分块，实测画质再降约 1.6 dB。仅在源确有明显退化（低码率、噪点、糊）时才值得；清晰源上收益很小。由独立 PyTorch 后端执行，编码器、CRF、码率、像素格式可调。'}
+                    {p.kind === 'realbasicvsr' && isMac() && ' M5 Max 实测速度与 RTX 5070 Ti 相当（720p 输入 4× 端到端约 1.4 fps，854×480 输入约 2 fps），模型载入只要 1 秒；720p 输入时内存峰值约 17 GB。'}
                     {p.kind === 'swiftvr' && isMac() && 'SwiftVR（2026 年 6 月开源，Apache-2.0，Wan2.2-5B 底座）单步流式生成式视频修复。M5 Max（36 GB）实测：720p → 2560×1440 稳态约 3 fps，960p 输出约 7 fps，约为 RTX 5070 Ti 的 40%～45%（Mac 没有 FP8 计算，权重以 bf16 常驻约 9.4 GB；画质与 Windows 输出一致）。2K 输出时内存峰值约 26～29 GB，渲染期间尽量少开其他大程序。静止背景的帧间稳定性在 AI 方法中最好（接近 Lanczos）。生成式模型会补出原片没有的细节（发茬、皮肤纹理、发丝），强退化素材收益最大；清晰源上可能"补"得过头。'}
                     {p.kind === 'swiftvr' && !isMac() && 'SwiftVR（2026 年 6 月开源，Apache-2.0，Wan2.2-5B 底座）单步流式生成式视频修复。RTX 5070 Ti 实测：720p → 2560×1440 稳态约 7 fps，约为 SeedVR2 的近 30 倍、不到 nomos8k-compact 的一半（RTX 40/50 系矩阵乘走 FP8 张量核；更早的显卡自动回退 bf16 计算，会慢一些）；静止背景的帧间稳定性在 AI 方法中最好（接近 Lanczos），实测也没有出现 SeedVR2 那样改变脸型的问题。生成式模型会补出原片没有的细节（发茬、皮肤纹理、发丝），强退化素材收益最大；清晰源上可能"补"得过头。需要 16GB 级显存：权重 FP8 量化后约 5GB 常驻。权重量化、FP8 张量核计算各自带来的输出差异都在 PSNR≈50dB，远小于编码损失，肉眼不可辨。'}
-                    {p.kind === 'seedvr2' && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度最慢：RTX 5070 Ti 实测 2560×1440 输出约 0.25 fps，支持断点续跑可分多次完成；实测在部分人脸上会改变脸型；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
+                    {p.kind === 'seedvr2' && isMac() && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度最慢：M5 Max 实测 1708×960 输出约 0.22 fps，约为 RTX 5070 Ti 的一半弱，支持断点续跑可分多次完成；实测在部分人脸上会改变脸型。Mac 不支持 FP8，用官方 fp16 权重（6.8 GB）；载入模型时内存瞬时峰值约 30 GB，建议 36 GB 以上统一内存并少开其他大程序。同样只建议用于确有退化的素材，多数情况 SwiftVR 快约 30 倍。'}
+                    {p.kind === 'seedvr2' && !isMac() && 'SeedVR2-3B（字节跳动开源，Apache-2.0）单步扩散视频超分，在退化源上的细节再生是当前开源天花板；分辨率不敏感，默认把短边放大 4 倍（可指定目标短边）。速度最慢：RTX 5070 Ti 实测 2560×1440 输出约 0.25 fps，支持断点续跑可分多次完成；实测在部分人脸上会改变脸型；FP8 权重 3.4 GB，显存策略按显卡自动分档。同样只建议用于确有退化的素材。'}
                     {isMac() && ['realesrgan', 'realcugan', 'span', 'rife'].includes(p.kind) && ' 以上速度为 RTX 5070 Ti 实测；M5 Max 上 NCNN 引擎约慢一倍（经 MoltenVK 运行，没有张量核加速；854×480 放大 2 倍稳态约 13 fps）。'}
                 </p>
                 {(p.kind === 'realbasicvsr' || p.kind === 'seedvr2' || p.kind === 'swiftvr') && (

@@ -12,9 +12,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import util from 'node:util';
 import {
-    CLI_REL, CORE_LIB_REL, ENGINE_SPAWN_OPTS, EXE_SUFFIX, PLATFORM, PY_ENGINES, SEEDVR2_DIT, SHARED_GPU_KEY,
+    CLI_REL, CORE_LIB_REL, ENGINE_SPAWN_OPTS, EXE_SUFFIX, PERF, PLATFORM, PY_ENGINES, SEEDVR2_DIT, SHARED_GPU_KEY,
     TORCH_DEVICES_PY, abortTree, childEnv, ffmpegDir, isNetworkPath, killTreeSync, nativeDialog, onTerminate,
-    openDirectory, pythonPaths, revealOutput, suspendTree, swiftvrPrecheck,
+    openDirectory, pythonPaths, revealOutput, seedvr2MemoryWarnings, suspendTree, swiftvrPrecheck,
 } from './platform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1734,12 +1734,12 @@ const server = http.createServer(async (req, res) => {
             if (model === 'realbasicvsr') {
                 // 吞吐随输入尺寸差一个数量级：RTX 5070 Ti 端到端实测 720x1280 约 1.4 fps，
                 // 小尺寸（各边 ≤512px）才有 ~8 fps。原先固定按 15 fps 估算，
-                // 对竖屏 720p 素材低估约 10 倍。
+                // 对竖屏 720p 素材低估约 10 倍。M5 Max 实测相近（见 platform.mjs 的 PERF）
                 const heavy = probeInfo.width > 512 || probeInfo.height > 512;
                 const tput = heavy ? 1.4 : 8;
                 const hours = frames / tput / 3600;
                 if (hours > 0.25) {
-                    warnings.push({ level: 'warn', text: `RealBasicVSR 吞吐约 ${tput} fps（参考 RTX 5070 Ti 实测；${heavy ? '大尺寸输入显著更慢' : '小尺寸输入'}）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时（支持断点续跑，可分多次完成）。若源本身码率高、画面干净，建议改用 SPAN 或 Lanczos——快数十倍且更忠实于原貌。` });
+                    warnings.push({ level: 'warn', text: `RealBasicVSR 吞吐约 ${tput} fps（参考 ${PERF.gpu} 实测；${heavy ? '大尺寸输入显著更慢' : '小尺寸输入'}）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时（支持断点续跑，可分多次完成）。若源本身码率高、画面干净，建议改用 SPAN 或 Lanczos——快数十倍且更忠实于原貌。` });
                 }
                 // 显存不足以整帧推理时会退化为空间分块，画质有实测可见的损失
                 const estFullGb = 12 * probeInfo.width * probeInfo.height * 743 / (1024 ** 3);
@@ -1748,15 +1748,16 @@ const server = http.createServer(async (req, res) => {
                 }
             } else if (model === 'seedvr2') {
                 // 吞吐与输出像素数近似成反比：RTX 5070 Ti 端到端实测 2560×1440 约 0.25 fps、
-                // 1708×960 约 0.47 fps（默认短边 4×，按输出像素估算）
+                // 1708×960 约 0.47 fps（默认短边 4×，按输出像素估算）；各平台标定见 platform.mjs 的 PERF
                 const shortIn = Math.min(probeInfo.width, probeInfo.height) || 1;
                 const res = Number(body.resolution) > 0 ? Number(body.resolution) : shortIn * 4;
                 const outMp = probeInfo.width * probeInfo.height * (res / shortIn) ** 2 / 1e6;
-                const tput = Math.min(1.5, 0.9 / Math.max(outMp, 0.1));
+                const tput = Math.min(1.5, PERF.seedvr2K / Math.max(outMp, 0.1));
                 const hours = frames / tput / 3600;
                 if (hours > 0.5) {
-                    warnings.push({ level: 'warn', text: `SeedVR2-3B 吞吐约 ${tput.toFixed(2)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，RTX 5070 Ti 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；同属生成式修复的 SwiftVR 快近 30 倍。` });
+                    warnings.push({ level: 'warn', text: `SeedVR2-3B 吞吐约 ${tput.toFixed(2)} fps（按输出 ${outMp.toFixed(1)} 百万像素估算，${PERF.gpu} 实测）：${frames} 帧预计耗时约 ${hours.toFixed(1)} 小时。支持断点续跑，可分多次完成；同属生成式修复的 SwiftVR 快近 30 倍。` });
                 }
+                warnings.push(...seedvr2MemoryWarnings(torchDevicesCache?.devices || [], outMp));
                 if (probeInfo.width * probeInfo.height >= 1920 * 1080) {
                     warnings.push({ level: 'warn', text: '输入 ≥1080p：SeedVR2 默认短边 4x 后输出超 4K，显存与时间开销极大，建议在高级选项中调低目标短边分辨率。' });
                 }
