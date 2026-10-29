@@ -166,7 +166,9 @@ int FilterHDR::build_graph(const AVFrame* ref_frame) {
         return AVERROR(ENOTSUP);
     }
 
-    std::string trc = (format_ == "hlg") ? "hlg" : "smpte2084";
+    // libplacebo's color_trc option only knows the canonical AVColorTransferCharacteristic
+    // names; HLG is "arib-std-b67" ("hlg" is rejected with "Unable to parse option value")
+    std::string trc = (format_ == "hlg") ? "arib-std-b67" : "smpte2084";
     std::string lp_args =
         "w=" + std::to_string(ref_frame->width) + ":h=" + std::to_string(ref_frame->height) +
         ":format=p010le:colorspace=bt2020nc:color_primaries=bt2020:color_trc=" + trc +
