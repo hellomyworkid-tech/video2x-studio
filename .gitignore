@@ -114,5 +114,7 @@ downloads/
 
 # macOS 移植
 build-macos/
+# 打包暂存（scripts/macos/package-app.mjs pre：可重定位的核心与动态库、随包 Python）
+/dist-macos/
 # 测试素材与参考输出（由迁移包恢复，不进 git）
 testdata/

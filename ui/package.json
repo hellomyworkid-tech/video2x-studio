@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "desktop": "electron .",
     "dist": "npm run build && node scripts/check-dist.mjs pre && electron-builder --win dir && node scripts/check-dist.mjs post",
-    "dist:portable": "npm run build && node scripts/check-dist.mjs pre && electron-builder --win portable"
+    "dist:portable": "npm run build && node scripts/check-dist.mjs pre && electron-builder --win portable",
+    "dist:mac": "npm run build && node ../scripts/macos/package-app.mjs pre && node scripts/check-dist.mjs pre && electron-builder --mac dir && node ../scripts/macos/package-app.mjs post && node scripts/check-dist.mjs post"
   },
   "build": {
     "appId": "studio.video2x.desktop",
@@ -26,117 +27,6 @@
       "dist/**",
       "package.json"
     ],
-    "extraFiles": [
-      {
-        "from": "../build-desktop/Release",
-        "to": "build-desktop/Release",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../build-desktop/third_party/boost/libs/program_options/Release",
-        "to": "build-desktop/third_party/boost/libs/program_options/Release",
-        "filter": [
-          "**/*.dll"
-        ]
-      },
-      {
-        "from": "../build-desktop/third_party/spdlog/Release",
-        "to": "build-desktop/third_party/spdlog/Release",
-        "filter": [
-          "**/*.dll"
-        ]
-      },
-      {
-        "from": "../build-desktop/third_party/librealcugan_ncnn_vulkan/src/Release",
-        "to": "build-desktop/third_party/librealcugan_ncnn_vulkan/src/Release",
-        "filter": [
-          "**/*.dll"
-        ]
-      },
-      {
-        "from": "../build-desktop/third_party/librealesrgan_ncnn_vulkan/src/Release",
-        "to": "build-desktop/third_party/librealesrgan_ncnn_vulkan/src/Release",
-        "filter": [
-          "**/*.dll"
-        ]
-      },
-      {
-        "from": "../build-desktop/third_party/librife_ncnn_vulkan/src/Release",
-        "to": "build-desktop/third_party/librife_ncnn_vulkan/src/Release",
-        "filter": [
-          "**/*.dll"
-        ]
-      },
-      {
-        "from": "../third_party/ffmpeg-shared",
-        "to": "third_party/ffmpeg-shared",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../third_party/ncnn-shared/x64",
-        "to": "third_party/ncnn-shared/x64",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../models",
-        "to": "models",
-        "filter": [
-          "**/*",
-          "!rife/rife/**",
-          "!rife/rife-HD/**",
-          "!rife/rife-UHD/**",
-          "!rife/rife-anime/**",
-          "!rife/rife-v2/**",
-          "!rife/rife-v2.3/**",
-          "!rife/rife-v2.4/**",
-          "!rife/rife-v3.0/**",
-          "!rife/rife-v3.1/**",
-          "!rife/rife-v4/**",
-          "!rife/rife-v4.25/**",
-          "!rife/rife-v4.25-lite/**"
-        ]
-      },
-      {
-        "from": "../engine-python",
-        "to": "engine-python",
-        "filter": [
-          "**/*",
-          "!.venv/**",
-          "!**/__pycache__/**",
-          "!weights/FlashVSR-v1.1/**",
-        "!weights/SwiftVR/transformer/diffusion_pytorch_model.safetensors",
-          "!python/Lib/site-packages/torch/include/**",
-          "!python/Lib/site-packages/*/tests/**",
-          "!python/Lib/site-packages/*/test/**"
-        ]
-      },
-      {
-        "from": "../LICENSE",
-        "to": "LICENSE.txt"
-      },
-      {
-        "from": "../NOTICE",
-        "to": "NOTICE.txt"
-      },
-      {
-        "from": "../WEIGHTS_LICENSES.md",
-        "to": "WEIGHTS_LICENSES.md"
-      },
-      {
-        "from": "../SOURCE.txt",
-        "to": "SOURCE.txt"
-      },
-      {
-        "from": "../COMPLIANCE.md",
-        "to": "COMPLIANCE.md"
-      }
-    ],
     "directories": {
       "output": "release"
     },
@@ -144,7 +34,216 @@
       "target": [
         "dir"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "extraFiles": [
+        {
+          "from": "../build-desktop/Release",
+          "to": "build-desktop/Release",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "../build-desktop/third_party/boost/libs/program_options/Release",
+          "to": "build-desktop/third_party/boost/libs/program_options/Release",
+          "filter": [
+            "**/*.dll"
+          ]
+        },
+        {
+          "from": "../build-desktop/third_party/spdlog/Release",
+          "to": "build-desktop/third_party/spdlog/Release",
+          "filter": [
+            "**/*.dll"
+          ]
+        },
+        {
+          "from": "../build-desktop/third_party/librealcugan_ncnn_vulkan/src/Release",
+          "to": "build-desktop/third_party/librealcugan_ncnn_vulkan/src/Release",
+          "filter": [
+            "**/*.dll"
+          ]
+        },
+        {
+          "from": "../build-desktop/third_party/librealesrgan_ncnn_vulkan/src/Release",
+          "to": "build-desktop/third_party/librealesrgan_ncnn_vulkan/src/Release",
+          "filter": [
+            "**/*.dll"
+          ]
+        },
+        {
+          "from": "../build-desktop/third_party/librife_ncnn_vulkan/src/Release",
+          "to": "build-desktop/third_party/librife_ncnn_vulkan/src/Release",
+          "filter": [
+            "**/*.dll"
+          ]
+        },
+        {
+          "from": "../third_party/ffmpeg-shared",
+          "to": "third_party/ffmpeg-shared",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "../third_party/ncnn-shared/x64",
+          "to": "third_party/ncnn-shared/x64",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "../models",
+          "to": "models",
+          "filter": [
+            "**/*",
+            "!rife/rife/**",
+            "!rife/rife-HD/**",
+            "!rife/rife-UHD/**",
+            "!rife/rife-anime/**",
+            "!rife/rife-v2/**",
+            "!rife/rife-v2.3/**",
+            "!rife/rife-v2.4/**",
+            "!rife/rife-v3.0/**",
+            "!rife/rife-v3.1/**",
+            "!rife/rife-v4/**",
+            "!rife/rife-v4.25/**",
+            "!rife/rife-v4.25-lite/**"
+          ]
+        },
+        {
+          "from": "../engine-python",
+          "to": "engine-python",
+          "filter": [
+            "**/*",
+            "!.venv/**",
+            "!**/__pycache__/**",
+            "!weights/FlashVSR-v1.1/**",
+            "!weights/SwiftVR/transformer/diffusion_pytorch_model.safetensors",
+            "!python/Lib/site-packages/torch/include/**",
+            "!python/Lib/site-packages/*/tests/**",
+            "!python/Lib/site-packages/*/test/**"
+          ]
+        },
+        {
+          "from": "../LICENSE",
+          "to": "LICENSE.txt"
+        },
+        {
+          "from": "../NOTICE",
+          "to": "NOTICE.txt"
+        },
+        {
+          "from": "../WEIGHTS_LICENSES.md",
+          "to": "WEIGHTS_LICENSES.md"
+        },
+        {
+          "from": "../SOURCE.txt",
+          "to": "SOURCE.txt"
+        },
+        {
+          "from": "../COMPLIANCE.md",
+          "to": "COMPLIANCE.md"
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        "dir"
+      ],
+      "icon": "build/icon.icns",
+      "identity": null,
+      "category": "public.app-category.video",
+      "minimumSystemVersion": "14.0",
+      "extraFiles": [
+        {
+          "from": "../dist-macos/build-macos",
+          "to": "build-macos",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "../dist-macos/third_party",
+          "to": "third_party",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "../dist-macos/vulkan",
+          "to": "vulkan",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "../dist-macos/engine-python/python",
+          "to": "engine-python/python",
+          "filter": [
+            "**/*",
+            "!.video2x-lock",
+            "!**/__pycache__/**",
+            "!lib/python3.12/test/**",
+            "!lib/python3.12/site-packages/torch/include/**",
+            "!lib/python3.12/site-packages/*/tests/**",
+            "!lib/python3.12/site-packages/*/test/**"
+          ]
+        },
+        {
+          "from": "../models",
+          "to": "models",
+          "filter": [
+            "**/*",
+            "!rife/rife/**",
+            "!rife/rife-HD/**",
+            "!rife/rife-UHD/**",
+            "!rife/rife-anime/**",
+            "!rife/rife-v2/**",
+            "!rife/rife-v2.3/**",
+            "!rife/rife-v2.4/**",
+            "!rife/rife-v3.0/**",
+            "!rife/rife-v3.1/**",
+            "!rife/rife-v4/**",
+            "!rife/rife-v4.25/**",
+            "!rife/rife-v4.25-lite/**"
+          ]
+        },
+        {
+          "from": "../engine-python",
+          "to": "engine-python",
+          "filter": [
+            "**/*",
+            "!.venv/**",
+            "!python/**",
+            "!downloads/**",
+            "!**/__pycache__/**",
+            "!weights/FlashVSR-v1.1/**",
+            "!weights/SwiftVR/transformer/diffusion_pytorch_model.safetensors",
+            "!weights/SeedVR2-3B/seedvr2_ema_3b_fp8_e4m3fn.safetensors"
+          ]
+        },
+        {
+          "from": "../LICENSE",
+          "to": "LICENSE.txt"
+        },
+        {
+          "from": "../NOTICE",
+          "to": "NOTICE.txt"
+        },
+        {
+          "from": "../WEIGHTS_LICENSES.md",
+          "to": "WEIGHTS_LICENSES.md"
+        },
+        {
+          "from": "../SOURCE.txt",
+          "to": "SOURCE.txt"
+        },
+        {
+          "from": "../COMPLIANCE.md",
+          "to": "COMPLIANCE.md"
+        }
+      ]
     },
     "portable": {
       "artifactName": "Video2X-Studio-${version}-portable.${ext}"
