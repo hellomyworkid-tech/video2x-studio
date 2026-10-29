@@ -77,6 +77,10 @@ const MAC_KEY_FILES = [
     'engine-python/weights/SwiftVR/reae.safetensors',
     'engine-python/weights/SwiftVR/prompt_embedding.safetensors',
     'engine-python/weights/SwiftVR/transformer/config.json',
+    // 随包第三方组件的许可证原文与源码清单（GPL 组件分发时必须附带）
+    'licenses/README.txt',
+    'licenses/ffmpeg/COPYING.GPLv2',
+    'licenses/electron/LICENSES.chromium.html',
 ];
 // Mac 包里不该有的大文件（Mac 用不上；extraFiles 的过滤写错时会让包大出 20 GB 以上）
 const MAC_EXCLUDED = [
@@ -87,7 +91,7 @@ const MAC_EXCLUDED = [
 const KEY_FILES = IS_MAC ? MAC_KEY_FILES : WIN_KEY_FILES;
 const KEY_DIRS = ['models/realesrgan', 'models/realcugan', 'models/rife', 'models/span', 'models/libplacebo'];
 // 关键文件的源：Mac 上这几个目录由 package-app.mjs pre 准备在 dist-macos/
-const MAC_STAGED = ['build-macos/', 'third_party/', 'vulkan/', 'engine-python/python/'];
+const MAC_STAGED = ['build-macos/', 'third_party/', 'vulkan/', 'licenses/', 'engine-python/python/'];
 const srcOf = (f) => path.join(IS_MAC && MAC_STAGED.some((p) => f.startsWith(p)) ? STAGE : ROOT, f);
 
 const errors = [];

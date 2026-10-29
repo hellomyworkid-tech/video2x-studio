@@ -178,6 +178,13 @@
           ]
         },
         {
+          "from": "../dist-macos/licenses",
+          "to": "licenses",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
           "from": "../dist-macos/engine-python/python",
           "to": "engine-python/python",
           "filter": [
