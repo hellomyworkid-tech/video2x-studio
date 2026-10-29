@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import util from 'node:util';
 import {
     CLI_REL, CORE_LIB_REL, ENGINE_SPAWN_OPTS, EXE_SUFFIX, PERF, PLATFORM, PY_ENGINES, SEEDVR2_DIT, SHARED_GPU_KEY,
-    TORCH_DEVICES_PY, abortTree, childEnv, ffmpegDir, isNetworkPath, killTreeSync, nativeDialog, onTerminate,
+    TORCH_DEVICES_PY, abortTree, cacheDir, childEnv, ffmpegDir, isNetworkPath, killTreeSync, nativeDialog, onTerminate,
     openDirectory, pythonPaths, revealOutput, seedvr2MemoryWarnings, suspendTree, swiftvrPrecheck,
 } from './platform.mjs';
 
@@ -135,7 +135,8 @@ function libplaceboAvailable() {
 // - rmvb/rm/wmv/asf/flv：先 remux 为 MKV（-c copy 无损），失败回退整文件拷贝
 // 暂存文件名 = 源路径+大小+mtime 的哈希，天然去重，断点续跑自动复用
 // ---------------------------------------------------------------------------
-const CACHE_DIR = path.join(PROJECT_ROOT, 'cache');
+// 位置见 platform.mjs 的 cacheDir（macOS 打包后不在包内）
+const CACHE_DIR = cacheDir(PROJECT_ROOT);
 
 // ---------------------------------------------------------------------------
 // 文件日志：cache/logs/bridge-YYYYMMDD.log，保留最近 7 天。

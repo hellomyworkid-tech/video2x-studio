@@ -5,6 +5,7 @@
 
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,11 +68,34 @@ function dllDirs(root) {
     ];
 }
 
+/** 项目根是否在打包后的 .app 里（xxx.app/Contents）。包内按只读对待：签名封存后不能改，
+ *  从"下载"等位置直接打开时系统还会把整个 App 挪到只读的随机路径运行（App Translocation） */
+function inAppBundle(root) {
+    return IS_MAC && path.basename(root) === 'Contents' && path.dirname(root).endsWith('.app');
+}
+
+/** 缓存目录：任务记录 jobs.json、日志、本地暂存。Windows 与开发环境放项目根下的 cache/；
+ *  macOS 打包后放 ~/Library/Application Support/Video2X Studio/cache。可用 VIDEO2X_CACHE_DIR 覆盖 */
+export function cacheDir(root) {
+    if (process.env.VIDEO2X_CACHE_DIR) return process.env.VIDEO2X_CACHE_DIR;
+    if (inAppBundle(root)) {
+        return path.join(os.homedir(), 'Library', 'Application Support', 'Video2X Studio', 'cache');
+    }
+    return path.join(root, 'cache');
+}
+
 /** 引擎子进程（CLI / worker）的环境变量。Windows 把 DLL 目录加进 PATH；
- *  macOS 动态库靠 rpath，只把 ffmpeg 目录传给 worker，保证两边用同一份 ffmpeg */
+ *  macOS 动态库靠 rpath，只把 ffmpeg 目录传给 worker，保证两边用同一份 ffmpeg。
+ *  macOS 打包后另有两项：libplacebo 经 vulkan-loader 加载 MoltenVK，要把包内的 ICD 清单指给
+ *  loader（开发环境由 loader 自己在 Homebrew 目录里找到）；Python 不往包内写 __pycache__
+ *  （打包时已预编译） */
 export function childEnv(root) {
     if (IS_WIN) return { ...process.env, PATH: [...dllDirs(root), process.env.PATH].join(';') };
-    return { ...process.env, VIDEO2X_FFMPEG_DIR: ffmpegDir(root) };
+    const env = { ...process.env, VIDEO2X_FFMPEG_DIR: ffmpegDir(root) };
+    const icd = path.join(root, 'vulkan', 'icd.d', 'MoltenVK_icd.json');
+    if (fs.existsSync(icd)) env.VK_DRIVER_FILES = icd;
+    if (inAppBundle(root)) env.PYTHONDONTWRITEBYTECODE = '1';
+    return env;
 }
 
 // ---------------------------------------------------------------------------
