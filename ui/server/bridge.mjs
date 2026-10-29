@@ -544,25 +544,37 @@ const busySlots = new Map(); // slotKey -> jobId
 const JOBS_FILE = path.join(CACHE_DIR, 'jobs.json');
 let persistTimer = null;
 
+function writeJobs() {
+    try {
+        fs.mkdirSync(CACHE_DIR, { recursive: true });
+        const data = {
+            nextJobId,
+            nextBatchId,
+            jobs: jobOrder.map((id) => {
+                const j = jobs.get(id);
+                return { ...j, child: undefined, log: (j.log || []).slice(-100) };
+            }),
+        };
+        const tmp = JOBS_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(data));
+        fs.renameSync(tmp, JOBS_FILE);
+    } catch { /* 落盘失败不影响运行 */ }
+}
+
 function persistJobs() {
     if (persistTimer) return; // 合并高频进度广播，1.2s 落一次
     persistTimer = setTimeout(() => {
         persistTimer = null;
-        try {
-            fs.mkdirSync(CACHE_DIR, { recursive: true });
-            const data = {
-                nextJobId,
-                nextBatchId,
-                jobs: jobOrder.map((id) => {
-                    const j = jobs.get(id);
-                    return { ...j, child: undefined, log: (j.log || []).slice(-100) };
-                }),
-            };
-            const tmp = JOBS_FILE + '.tmp';
-            fs.writeFileSync(tmp, JSON.stringify(data));
-            fs.renameSync(tmp, JOBS_FILE);
-        } catch { /* 落盘失败不影响运行 */ }
+        writeJobs();
     }, 1200);
+}
+
+/** 退出前把还没落盘的改动立即写下（否则退出前 1.2s 内的改动会丢，例如清空记录后马上退出，下次启动记录又回来） */
+function flushJobs() {
+    if (!persistTimer) return;
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    writeJobs();
 }
 
 function loadJobs() {
@@ -727,6 +739,7 @@ export function shutdownBridge() {
             } catch { /* best effort */ }
         }
     }
+    flushJobs();
 }
 
 function broadcastJobs() {
