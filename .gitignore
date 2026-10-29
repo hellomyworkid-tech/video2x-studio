@@ -1,5 +1,5 @@
-# Data files
-data/
+# Data files（只忽略仓库根；不带前导 / 会连 vendor 里的 Python 包 src/data 一起忽略）
+/data/
 
 # Built-binaries
 bin/
