@@ -19,8 +19,10 @@ on:
       - "CMakeLists.txt"
   workflow_dispatch:
 
+# 上游的 Linux / Windows / 容器 / AppImage 构建：本分支不维护这些产物（submodule 也未入库），只在上游仓库运行
 jobs:
   ubuntu:
+    if: github.repository == 'k4yt3x/video2x'
     runs-on: ubuntu-latest
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -64,6 +66,7 @@ jobs:
           path: /tmp/install
 
   windows:
+    if: github.repository == 'k4yt3x/video2x'
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -109,6 +112,7 @@ jobs:
           path: build/video2x_install
 
   container:
+    if: github.repository == 'k4yt3x/video2x'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -124,6 +128,7 @@ jobs:
           pushImage: false
 
   appimage:
+    if: github.repository == 'k4yt3x/video2x'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
