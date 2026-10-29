@@ -25,7 +25,7 @@ export default function InstallBanner({ install }: { install: InstallStatus }) {
                             <div className="mt-1.5 text-muted-foreground">
                                 这些是程序本体文件，无法在线下载。开发环境下请按 docs/macos/03-setup.md 编译 C++ 核心
                                 （scripts/macos/build-core.sh）并安装依赖（scripts/macos/bootstrap.sh）；
-                                FFmpeg 缺失时运行 brew install ffmpeg@7。
+                                FFmpeg 缺失时运行 scripts/macos/build-ffmpeg.sh（Homebrew 的 ffmpeg@7 也能用，但没有 Anime4K 与 HDR）。
                             </div>
                         ) : (
                             <div className="mt-1.5 text-muted-foreground">

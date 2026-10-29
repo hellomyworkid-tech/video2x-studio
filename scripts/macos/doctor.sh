@@ -35,30 +35,43 @@ if command -v brew >/dev/null 2>&1; then
     v=$(brew list --versions "$f" 2>/dev/null)
     if [ -n "$v" ]; then ok "$v"; else bad "未安装 $f"; fi
   done
-  brew list --versions ffmpeg >/dev/null 2>&1 && warn "同时装了普通 ffmpeg（9.x，无 vidstab/libplacebo）：确保构建与运行用的是 ffmpeg@7"
+  brew list --versions ffmpeg >/dev/null 2>&1 && warn "同时装了普通 ffmpeg（9.x，无 vidstab/libplacebo）：确保构建与运行用的是 7.1（下一节）"
 fi
 
-section "FFmpeg（ffmpeg@7）"
-FFDIR="${VIDEO2X_FFMPEG_DIR:-$(brew --prefix ffmpeg@7 2>/dev/null)/bin}"
+section "FFmpeg 7.1"
+# 与 ui/server/platform.mjs 的 ffmpegDir 同一顺序：环境变量 → 自编的 third_party/ffmpeg-macos → Homebrew ffmpeg@7
+if [ -n "${VIDEO2X_FFMPEG_DIR:-}" ]; then FFDIR="$VIDEO2X_FFMPEG_DIR"
+elif [ -x "$ROOT/third_party/ffmpeg-macos/bin/ffmpeg" ]; then FFDIR="$ROOT/third_party/ffmpeg-macos/bin"
+else
+  FFDIR="$(brew --prefix ffmpeg@7 2>/dev/null)/bin"
+  warn "没有自编 FFmpeg（third_party/ffmpeg-macos），用 Homebrew ffmpeg@7：Anime4K 与 HDR 不可用（scripts/macos/build-ffmpeg.sh）"
+fi
 FF="$FFDIR/ffmpeg"
 if [ -x "$FF" ]; then
-  ok "$("$FF" -hide_banner -version | head -1)"
+  ok "$("$FF" -hide_banner -version | head -1)（$FFDIR）"
   FILTERS=$("$FF" -hide_banner -filters 2>/dev/null)
   for flt in vidstabdetect vidstabtransform hqdn3d nlmeans libplacebo zscale; do
     if echo "$FILTERS" | grep -qw "$flt"; then ok "滤镜 $flt"; else
-      case $flt in libplacebo|zscale) warn "滤镜 $flt 不可用（Anime4K/HDR 需要，阶段 4 处理）";; *) bad "滤镜 $flt 不可用";; esac
+      case $flt in libplacebo|zscale) warn "滤镜 $flt 不可用（Anime4K/HDR 需要，scripts/macos/build-ffmpeg.sh）";; *) bad "滤镜 $flt 不可用";; esac
     fi
   done
   ENCS=$("$FF" -hide_banner -encoders 2>/dev/null)
-  for enc in libx264 libx265 h264_videotoolbox hevc_videotoolbox; do
+  for enc in libx264 libx265 libaom-av1 libvpx-vp9 h264_videotoolbox hevc_videotoolbox; do
     echo "$ENCS" | grep -qw "$enc" && ok "编码器 $enc" || warn "编码器 $enc 不可用"
   done
   "$FF" -hide_banner -hwaccels 2>/dev/null | grep -qw videotoolbox && ok "硬件解码 videotoolbox" || warn "无 videotoolbox 硬件解码"
-  PKG_CONFIG_PATH="$(brew --prefix ffmpeg@7)/lib/pkgconfig" pkg-config --modversion libavcodec >/dev/null 2>&1 \
-    && ok "pkg-config 能找到 ffmpeg@7（libavcodec $(PKG_CONFIG_PATH="$(brew --prefix ffmpeg@7)/lib/pkgconfig" pkg-config --modversion libavcodec)）" \
-    || bad "pkg-config 找不到 ffmpeg@7 的 libavcodec"
+  FFLIB="$(cd "$FFDIR/.." && pwd)/lib"
+  PKG_CONFIG_PATH="$FFLIB/pkgconfig" pkg-config --modversion libavcodec >/dev/null 2>&1 \
+    && ok "pkg-config 能找到它的 libavcodec $(PKG_CONFIG_PATH="$FFLIB/pkgconfig" pkg-config --modversion libavcodec)" \
+    || bad "pkg-config 在 $FFLIB/pkgconfig 找不到 libavcodec"
+  # 界面按这份 ffmpeg 有没有 libplacebo 放开 Anime4K/HDR，核心也必须链接同一份，否则会在处理时才报找不到滤镜
+  if [ -f "$ROOT/build-macos/libvideo2x.dylib" ]; then
+    CORE_FFLIB=$(dirname "$(otool -L "$ROOT/build-macos/libvideo2x.dylib" | awk '/libavfilter/{print $1}')")
+    if [ "$CORE_FFLIB" = "$FFLIB" ]; then ok "核心链接的是同一份 FFmpeg"
+    else bad "核心链接的是 $CORE_FFLIB，界面用的是 $FFLIB：重新运行 scripts/macos/build-core.sh"; fi
+  fi
 else
-  bad "找不到 $FF（brew install ffmpeg@7）"
+  bad "找不到 $FF（scripts/macos/build-ffmpeg.sh，或 brew install ffmpeg@7）"
 fi
 
 section "Vulkan / MoltenVK（ncnn 引擎依赖）"

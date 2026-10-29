@@ -63,8 +63,11 @@ if os.name == 'nt':
     FFMPEG = FFMPEG_DIR / 'ffmpeg.exe'
     FFPROBE = FFMPEG_DIR / 'ffprobe.exe'
 else:
-    # macOS 开发期用 Homebrew 的 ffmpeg@7（keg-only，不在 PATH 上）；bridge 通过 VIDEO2X_FFMPEG_DIR 传入
-    FFMPEG_DIR = Path(os.environ.get('VIDEO2X_FFMPEG_DIR') or '/opt/homebrew/opt/ffmpeg@7/bin')
+    # macOS：bridge 通过 VIDEO2X_FFMPEG_DIR 传入；单独运行时与 ui/server/platform.mjs 的 ffmpegDir 同一顺序——
+    # scripts/macos/build-ffmpeg.sh 编出的 third_party/ffmpeg-macos，再退回 Homebrew 的 ffmpeg@7（keg-only，不在 PATH 上）
+    _OWN_FFMPEG_DIR = PROJECT_ROOT / 'third_party' / 'ffmpeg-macos' / 'bin'
+    FFMPEG_DIR = Path(os.environ.get('VIDEO2X_FFMPEG_DIR')
+                      or (_OWN_FFMPEG_DIR if (_OWN_FFMPEG_DIR / 'ffmpeg').exists() else '/opt/homebrew/opt/ffmpeg@7/bin'))
     FFMPEG = FFMPEG_DIR / 'ffmpeg'
     FFPROBE = FFMPEG_DIR / 'ffprobe'
 

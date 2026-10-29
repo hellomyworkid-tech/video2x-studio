@@ -41,11 +41,14 @@ export function pythonPaths(root) {
         };
 }
 
-/** FFmpeg 所在目录。Windows 随包分发；macOS 开发期用 Homebrew 的 ffmpeg@7（keg-only，不在 PATH 上），
- *  可用 VIDEO2X_FFMPEG_DIR 覆盖 */
+/** FFmpeg 所在目录。Windows 随包分发；macOS 优先用 scripts/macos/build-ffmpeg.sh 编出的
+ *  third_party/ffmpeg-macos（带 libplacebo，与 build-core.sh 链接的是同一份），没有时退回
+ *  Homebrew 的 ffmpeg@7（keg-only，不在 PATH 上）。可用 VIDEO2X_FFMPEG_DIR 覆盖 */
 export function ffmpegDir(root) {
     if (IS_WIN) return path.join(root, 'third_party', 'ffmpeg-shared', 'bin');
-    return process.env.VIDEO2X_FFMPEG_DIR || '/opt/homebrew/opt/ffmpeg@7/bin';
+    if (process.env.VIDEO2X_FFMPEG_DIR) return process.env.VIDEO2X_FFMPEG_DIR;
+    const own = path.join(root, 'third_party', 'ffmpeg-macos', 'bin');
+    return fs.existsSync(path.join(own, 'ffmpeg')) ? own : '/opt/homebrew/opt/ffmpeg@7/bin';
 }
 
 export const EXE_SUFFIX = IS_WIN ? '.exe' : '';

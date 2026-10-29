@@ -12,7 +12,7 @@ PY=engine-python/.venv/bin/python
 IN=testdata/inputs
 OUT=testdata/mac
 mkdir -p "$OUT"
-export VIDEO2X_FFMPEG_DIR="${VIDEO2X_FFMPEG_DIR:-$(brew --prefix ffmpeg@7 2>/dev/null)/bin}"
+# worker.py 未设置 VIDEO2X_FFMPEG_DIR 时与 bridge 选同一份 FFmpeg（third_party/ffmpeg-macos，没有则 ffmpeg@7）
 
 fails=0
 run() {
