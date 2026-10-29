@@ -20,10 +20,9 @@
 - `run-reference.sh`：用 Windows 参考命令在 Mac 上重跑，输出到 `testdata/mac/`。
 - `compare.sh`：把 Mac 输出与 Windows 参考输出逐帧比 PSNR。
 - `accept-bridge.mjs`：经 bridge 的 HTTP 接口做阶段 2 / 4 验收。
-- `package-app.mjs`：`npm run dist:mac` 的打包前后两步（动态库重定位、随包 Python、签名与检查），见 03-setup.md §9。
+- `package-app.mjs`：`npm run dist:mac` 的打包前后两步（动态库重定位、随包 Python、第三方许可证清单、签名与检查），见 03-setup.md §9。
 
-> 这些脚本是在 Windows 上写的，**没有在 Mac 上实际跑过**。第一次运行时请 Claude Code
-> 边跑边修，修好后提交。
+> 这些脚本最初在 Windows 上写成，阶段 0–5 已在 Apple Silicon Mac 上逐个实际运行并修正。
 
 ## 给 Mac 上 Claude Code 的工作约定
 

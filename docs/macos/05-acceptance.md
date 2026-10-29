@@ -128,5 +128,9 @@ Windows 参考输出在 `testdata/reference-windows/`，确切命令见同目录
 
 ## 阶段 6：文档
 
-- [ ] README / CHANGELOG / NOTICE / COMPLIANCE 补上 macOS 内容（含 MoltenVK、Vulkan Loader、python-build-standalone 的许可）
-- [ ] 本目录文档按实际做法修订（特别是 03-setup.md 里没实测过的命令）
+- [x] README / CHANGELOG / NOTICE / COMPLIANCE 补上 macOS 内容（含 MoltenVK、Vulkan Loader、python-build-standalone 的许可）
+  - 更正：两个平台随包的 FFmpeg 都是 GPL 构建（原文写作 LGPL-2.1）。Mac 版自编时用了 `--enable-gpl`，`ffmpeg -L` 显示 GPL v2 或更新版本。
+  - `.app` 新增 `Contents/licenses/`：24 个随包原生组件与 Electron 的许可证原文，`README.txt` 列出随包文件、版本、许可与同版本源码地址。Homebrew 库的地址取自 keg 里的配方副本，例如 x264 精确到提交号、ncnn 是实际装的 20260526；`brew info` 给的是之后升级的版本，对不上随包二进制。
+  - Electron 的 LICENSE 与 Chromium 的 LICENSES.chromium.html：Windows 包由 electron-builder 自动放进去，Mac 包原先没有，这次一并补上。`check-dist` 的 Mac 关键文件从 22 项增至 25 项。
+  - 源码公开在 https://github.com/hellomyworkid-tech/video2x-studio ，SOURCE.txt、README、COMPLIANCE 都指向这个地址。
+- [x] 本目录文档按实际做法修订：阶段 0–5 逐节修正；03-setup.md 与 00-README.md 里"未在 Mac 上实测"的提示已去掉

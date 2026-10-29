@@ -13,6 +13,11 @@
 
 # Video2X Studio
 
+> 本仓库是开源项目 [Video2X](https://github.com/k4yt3x/video2x) 的**非官方修改分支**，与上游作者 K4YT3X
+> 没有隶属或背书关系；页首徽章与下文的安装包、文档、社区链接都指向上游原版。
+> *An unofficial modified branch of Video2X, not affiliated with or endorsed by its author.
+> The badges above and the install, docs and community links below refer to upstream Video2X.*
+
 **一台装在自己电脑上的视频修复工作室。**
 
 低清的、抖的、满是噪点的老片子，批量丢进去——出来就是高清的、稳的、干净的版本。
@@ -38,7 +43,8 @@ NAS 网络盘里的片源直接处理，自动封装预处理。
 **③ 解压即用，不用当运维**
 
 Windows 便携包解压即跑：Python、CUDA 运行时、FFmpeg、模型全部内置，
-不污染系统，不折腾环境。界面就是拖进去、选档位、点开始三件事。
+不污染系统，不折腾环境。macOS（Apple Silicon）版打包成双击即用的 .app，同样自带 Python、FFmpeg 与模型。
+界面就是拖进去、选档位、点开始三件事。
 
 ## 它能帮你做什么
 
@@ -126,6 +132,19 @@ Both support pause (process freeze), stop-at-checkpoint, and resume
 - **`--hdr`** — SDR→HDR tone mapping (`src/filter_hdr.cpp`, libplacebo-based `src/filter_libplacebo.cpp`)
 - **SPAN** super-resolution model support via ncnn/Vulkan (`src/filter_span.cpp`, `models/span/`)
 - Decoder flush fix and FilterChain composability: denoise/stab/HDR chain freely with any upscaler
+
+### 🍎 macOS（Apple Silicon）
+
+全部处理器、增强滤镜与批量队列都已移植到 macOS（M 系列芯片，macOS 14+）；CUDA 专属的加速
+（SageAttention、FP8 计算）在 Mac 上不可用。
+
+- ncnn 引擎（Real-ESRGAN / Real-CUGAN / RIFE 等）经 MoltenVK 跑在 Apple GPU 上；SwiftVR、SeedVR2、RealBasicVSR
+  用 PyTorch MPS；编码可选 VideoToolbox 硬件编码。
+- Anime4K 与 SDR→HDR 需要带 libplacebo 的 FFmpeg：`scripts/macos/build-ffmpeg.sh` 从官方源码编译 FFmpeg 7.1.5。
+- 搭环境、编译、打包见 [docs/macos/03-setup.md](docs/macos/03-setup.md)；`cd ui && npm run dist:mac`
+  产出双击可用的 `Video2X Studio.app`（ad-hoc 签名，未经 Apple 公证）。
+- 验收以 Windows 版的参考输出为基准逐帧比 PSNR，方法与结果见 [docs/macos/05-acceptance.md](docs/macos/05-acceptance.md)；
+  速度与画质实测见 `docs/reports/macOS-*`。
 
 ## 🖥️ Hardware Requirements
 
@@ -224,23 +243,22 @@ Copyright (C) 2018-2025 K4YT3X and [contributors](https://github.com/k4yt3x/vide
 ### Source Code Availability / 源码获取
 
 This repository is a **modified branch** of Video2X: it adds the Video2X Studio
-desktop application (`ui/`), three Python VSR engines (`engine-python/`), and
-changes to the C++ core (FilterChain, HDR, VidStab, SPAN, …). In compliance
-with AGPL-3.0 §13, the complete corresponding source of this modified version
-is maintained in this git working copy, with every change committed, and is
-available free of charge from the distributor on request. The upstream,
-unmodified project (without this branch's additions) lives at
-<https://github.com/k4yt3x/video2x>.
+desktop application (`ui/`), three Python VSR engines (`engine-python/`), a
+macOS port, and changes to the C++ core (FilterChain, HDR, VidStab, SPAN, …).
+In compliance with AGPL-3.0 §13, the complete corresponding source of this
+modified version, with full history, is this public repository:
+<https://github.com/hellomyworkid-tech/video2x-studio>. The upstream, unmodified
+project (without this branch's additions) lives at <https://github.com/k4yt3x/video2x>.
 
-本仓库是 Video2X 的**修改分支**，新增 Studio 桌面程序、Python 超分引擎与 C++ 核心改动。
-依 AGPL-3.0 §13，这些修改的完整对应源码均提交在本 git 工作副本中，可向分发方免费索取；
-便携包内附带的 `SOURCE.txt` 有同样说明。上游原版（不含本分支新增内容）见上述链接。
+本仓库是 Video2X 的**修改分支**，新增 Studio 桌面程序、Python 超分引擎、macOS 移植与 C++ 核心改动。
+依 AGPL-3.0 §13，这些修改的完整对应源码（含提交历史）就是本公开仓库；发布包内附带的 `SOURCE.txt`
+写的是同一地址。上游原版（不含本分支新增内容）见上述链接。
 
 This project includes or depends on these following projects:
 
 | Project                                                                               | License         |
 | ------------------------------------------------------------------------------------- | --------------- |
-| [FFmpeg/FFmpeg](https://www.ffmpeg.org/)                                              | LGPLv2.1, GPLv2 |
+| [FFmpeg/FFmpeg](https://www.ffmpeg.org/)                                              | LGPLv2.1, GPLv2（本分支随包的构建为 GPL，见 COMPLIANCE.md §6） |
 | [Tencent/ncnn](https://github.com/Tencent/ncnn)                                       | BSD 3-Clause    |
 | [bloc97/Anime4K](https://github.com/bloc97/Anime4K)                                   | MIT License     |
 | [nihui/realcugan-ncnn-vulkan](https://github.com/nihui/realcugan-ncnn-vulkan)         | MIT License     |
@@ -253,6 +271,10 @@ This project includes or depends on these following projects:
 | [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | Apache 2.0 |
 | [H-oliday/SwiftVR](https://github.com/H-oliday/SwiftVR)（底座 [Wan2.2](https://github.com/Wan-Video/Wan2.2)） | Apache 2.0 |
 | [huggingface/diffusers](https://github.com/huggingface/diffusers)、[dmlc/decord](https://github.com/dmlc/decord) | Apache 2.0 |
+| [haasn/libplacebo](https://code.videolan.org/videolan/libplacebo)                     | LGPLv2.1+       |
+| [KhronosGroup/MoltenVK](https://github.com/KhronosGroup/MoltenVK)、[Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader)（macOS 随包） | Apache 2.0 |
+| [x264](https://code.videolan.org/videolan/x264)、[x265](https://github.com/Multicorewareinc/x265)、[vid.stab](https://github.com/georgmartius/vid.stab)（macOS 随包） | GPLv2+ |
+| [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone)（macOS 随包 CPython） | PSF 2.0 等 |
 | [anuragranj/spynet](https://github.com/anuragranj/spynet)（仅权重，经 OpenMMLab 分发） | 非商业/科研用途 |
 
 More licensing information can be found in the [NOTICE](NOTICE) file.

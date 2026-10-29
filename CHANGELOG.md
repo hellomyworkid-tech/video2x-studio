@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bundled SageAttention 2 (Apache 2.0) and triton-windows (MIT) in the embedded Python. Both engines self-test SageAttention at startup (including the Triton JIT compile) and fall back to SDPA if it fails, so an unsupported GPU or a failing compiler never kills a job. Measured effect is small because attention is a minor share of the work: SwiftVR uses 16×16 window attention (≈6 % of GPU time), SeedVR2's DiT got 3 % faster while VAE encode/decode dominate.
 - SeedVR2 honours `--tile` (0 = untiled VAE) and logs peak VRAM.
 - PyTorch engines: subtitle stream copy, audio/subtitle copy switches, `--pix-fmt` (e.g. 10-bit), automatic SeedVR2 attention backend (SageAttention/FlashAttention when installed, `V2X_SEEDVR2_ATTN` override).
+- macOS (Apple Silicon) port. ncnn processors run on Apple GPUs through MoltenVK; SwiftVR, SeedVR2 and RealBasicVSR run on PyTorch MPS (bf16 loading path, unified-memory budget, retry on MPS out-of-memory); the VideoToolbox H.264/HEVC encoders honour the quality setting and tag HEVC as `hvc1`. Anime4K and SDR→HDR use FFmpeg 7.1.5 built from source with libplacebo (`scripts/macos/build-ffmpeg.sh`). Platform differences in the bridge and desktop shell live in `ui/server/platform.mjs`; the UI shows macOS devices, encoders and unavailable features. Setup, acceptance against the Windows reference outputs and measured results are in `docs/macos/` and `docs/reports/macOS-*`.
+- macOS packaging: `npm run dist:mac` builds a double-clickable `Video2X Studio.app` with an embedded Python (python-build-standalone) and the native libraries relocated into the bundle and re-signed ad hoc. `Contents/licenses/` carries each bundled library's license texts with a version-matched source list; the packaged app keeps its cache and logs in `~/Library/Application Support/Video2X Studio/`.
 
 ### Changed (this branch / 本分支)
 
@@ -37,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bit rate is entered in Mbps and is mutually exclusive with CRF.
 - Explicit output sizes are rounded up to even dimensions.
 - Dependencies updated within major versions (Electron 43.7.7, React 19.3, Vite 7.3.6); production `npm audit` is clean.
+- Licensing documents corrected: the bundled FFmpeg builds are GPL (Windows: gyan.dev 7.1 "full", GPLv3; macOS: GPLv2 or later), not LGPL as previously stated. NOTICE and COMPLIANCE.md list the macOS components, and SOURCE.txt / README point to the public source repository.
+- The Windows packaging file list moved from `build.extraFiles` to `build.win.extraFiles` (macOS has its own list); its contents are unchanged.
+- Upstream's GitHub Actions build workflow only runs in the upstream repository; this branch does not maintain those Linux/Windows/container/AppImage artifacts.
 
 ### Fixed (this branch / 本分支)
 
@@ -51,6 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Downloaded weights were deleted when the Python runtime was missing (verification failure was mistaken for corruption).
 - Stabilization rejected frames smaller than 128×128 instead of crashing intermittently inside libvidstab.
 - Removed dead code (`temporal_buffer`) and the unused FlashVSR vendor tree.
+- HLG output failed with "Unable to parse option value": libplacebo only accepts the canonical transfer name `arib-std-b67`.
+- HDR output with hardware HEVC encoders (VideoToolbox, NVENC, AMF) was rejected; the 10-bit pixel format is now chosen per encoder (`p010le` when `yuv420p10le` is not supported).
+- Job changes made in the last ~1 s before quitting (for example clearing finished jobs) were lost; the bridge now writes pending job records on shutdown.
+- Hardware decoding (`-a cuda` / `d3d11va` / `videotoolbox`) combined with an ncnn processor exited immediately because GPU frames reached swscale; frames are now copied back to system memory first (verified on macOS; Windows not yet re-tested).
+- PyTorch engines failed to merge macro segments when `-o` was a relative path (the UI always passes absolute paths).
+- Vendored SwiftVR / SeedVR2 source files that an over-broad `.gitignore` rule had kept out of the repository are now tracked.
+- (macOS) Anime4K produced random corrupted frames when libplacebo imported FFmpeg's Vulkan device on MoltenVK; it now creates its own device.
 
 ### Added
 

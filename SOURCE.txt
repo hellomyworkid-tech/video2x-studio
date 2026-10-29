@@ -1,46 +1,58 @@
 Video2X Studio（Video2X 桌面增强分支）— 源码获取说明 / Source Availability
 =====================================================================================
 
-本分发版本（含便携包 win-unpacked 与安装包）是 Video2X 的衍生修改版，
-主程序基于 GNU Affero General Public License v3.0（AGPL-3.0）发布。
-许可证全文见随包 LICENSE.txt，第三方组件清单见 NOTICE.txt，
-模型权重逐项许可见 WEIGHTS_LICENSES.md。
+本分发版本（Windows 便携包 win-unpacked 与安装包、macOS 的 Video2X Studio.app）是
+Video2X 的衍生修改版，主程序基于 GNU Affero General Public License v3.0（AGPL-3.0）
+发布。许可证全文见随包 LICENSE.txt，第三方组件清单见 NOTICE.txt，模型权重逐项许可见
+WEIGHTS_LICENSES.md；macOS 包另有 licenses/ 目录，内含随包第三方库的许可证原文与源码清单。
 
 【这份修改版的源码在哪里】
 
-本分支在原项目基础上新增了 Video2X Studio 桌面程序（ui/）、三个 Python
-视频超分引擎（engine-python/）以及对 C++ 核心的多处修改（FilterChain、
-HDR、VidStab、SPAN 等）。这些修改当前保存在分发方本机的 git 工作副本中，
-并随每次修改完整提交。
+本分支在原项目基础上新增了 Video2X Studio 桌面程序（ui/）、三个 Python 视频超分引擎
+（engine-python/）、macOS 移植，以及对 C++ 核心的多处修改（FilterChain、HDR、VidStab、
+SPAN 等）。全部修改的完整源码（含提交历史）公开在：
 
-按照 AGPL-3.0 第 13 条，任何拿到本程序的人都有权获得与之对应的完整源码。
-获取方式：
+  https://github.com/hellomyworkid-tech/video2x-studio
 
-  1. 直接向提供本拷贝给你的分发方索取源码副本（git 仓库整体打包，
-     含全部提交历史）——分发方有义务免费提供；
-  2. 上游原项目源码（不含本分支新增内容）位于：
+按照 AGPL-3.0 第 13 条，任何拿到本程序的人都有权获得与之对应的完整源码。获取方式：
+
+  1. 从上面的公开仓库获取；
+  2. 或直接向提供本拷贝给你的分发方索取源码副本——分发方有义务免费提供；
+  3. 上游原项目源码（不含本分支新增内容）位于：
      https://github.com/k4yt3x/video2x
+
+【随包 GPL 组件的源码】
+
+随包的 FFmpeg 是 GPL 构建（macOS 包还含 x264、x265、vid.stab）。FFmpeg 官方源码见
+https://github.com/FFmpeg/FFmpeg ；macOS 包里每个组件与随包二进制同一版本的源码地址
+列在 licenses/README.txt。也可以向分发方索取这些源码。
 
 ----------------------------------------------------------------------
 
-This distribution (including the win-unpacked portable package and any
-installer) is a modified derivative of Video2X, licensed under the GNU
-Affero General Public License v3.0. See LICENSE.txt for the full license,
-NOTICE.txt for third-party components, and WEIGHTS_LICENSES.md for
-per-weight model licensing.
+This distribution (the Windows win-unpacked portable package and installer, and
+the macOS Video2X Studio.app) is a modified derivative of Video2X, licensed under
+the GNU Affero General Public License v3.0. See LICENSE.txt for the full license,
+NOTICE.txt for third-party components, and WEIGHTS_LICENSES.md for per-weight
+model licensing; the macOS app also carries a licenses/ folder with the license
+texts and a source list for its bundled third-party libraries.
 
-This branch adds the Video2X Studio desktop application (ui/), three
-Python video super-resolution engines (engine-python/), and multiple
+This branch adds the Video2X Studio desktop application (ui/), three Python
+video super-resolution engines (engine-python/), a macOS port, and multiple
 modifications to the C++ core (FilterChain, HDR, VidStab, SPAN, etc.).
-The complete corresponding source of THESE modifications is maintained
-in a git working copy on the distributor's machine, with every change
-committed.
+The complete source of these modifications, with history, is public at:
+
+  https://github.com/hellomyworkid-tech/video2x-studio
 
 Under AGPL-3.0 §13, anyone who receives this program is entitled to its
 complete corresponding source code:
 
-  1. Request a copy of the source (the full git repository, including
-     history) from the person who gave you this build — they are
+  1. Get it from the public repository above;
+  2. Or request a copy from the person who gave you this build — they are
      obligated to provide it free of charge;
-  2. The upstream, unmodified project (without this branch's additions)
+  3. The upstream, unmodified project (without this branch's additions)
      is available at https://github.com/k4yt3x/video2x
+
+The bundled FFmpeg is a GPL build (the macOS app also bundles x264, x265 and
+vid.stab). FFmpeg's source is at https://github.com/FFmpeg/FFmpeg; in the macOS
+app, licenses/README.txt lists a source URL matching each bundled component's
+version. You may also request these sources from the distributor.

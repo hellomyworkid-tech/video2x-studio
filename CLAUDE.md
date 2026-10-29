@@ -3,8 +3,8 @@
 ## 当前状态
 
 - Windows 版完整可用并已打包。
-- 当前任务：**移植到 macOS（Apple Silicon）**。先读 `docs/macos/00-README.md`，再按 `docs/macos/01-feasibility.md` 的阶段路线推进。
-- 每个阶段完成后，按 `docs/macos/05-acceptance.md` 验收并提交。
+- macOS（Apple Silicon）移植的阶段 0–6 已完成，`cd ui && npm run dist:mac` 产出 `.app`；还要人工确认的项目是 `docs/macos/05-acceptance.md` 里没勾选的条目。
+- 两个平台都要继续可用：改动走平台分支，bridge 的平台差异收在 `ui/server/platform.mjs`；改完按 `docs/macos/05-acceptance.md` 的方法回归。
 
 ## 项目是什么
 

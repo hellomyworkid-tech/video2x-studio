@@ -2,6 +2,10 @@ Video2X
 Copyright (C) 2018-2024 K4YT3X and contributors.
 
 This product depends on FFmpeg, which is available under the GNU Lesser General Public License 2.1.
+The FFmpeg builds bundled with Video2X Studio enable GPL components and are therefore
+licensed under the GNU General Public License: the Windows package bundles the gyan.dev
+FFmpeg 7.1 "full" shared build (GPL version 3), and the macOS package bundles FFmpeg 7.1.5
+built by scripts/macos/build-ffmpeg.sh with --enable-gpl (GPL version 2 or later).
 The source code can be found at https://github.com/FFmpeg/FFmpeg.
 
 This product depends on Anime4K, which is available under the MIT License.
@@ -95,3 +99,47 @@ triton-windows includes:
   and library. The source code can be found at https://repo.or.cz/tinycc.git.
 - ptxas.exe and CUDA headers from the NVIDIA CUDA Toolkit, distributed under the
   NVIDIA CUDA Toolkit End User License Agreement (https://docs.nvidia.com/cuda/eula/).
+
+The embedded Python packages keep their license files in their *.dist-info
+directories. They are under permissive licenses (MIT, BSD, Apache License 2.0,
+PSF, MPL 2.0, ISC) except easydict, which is available under the GNU Lesser
+General Public License 3.0 and is used unmodified. The imageio-ffmpeg package
+ships a prebuilt FFmpeg executable (the macOS arm64 one is a GPL build); its
+sources are described at https://github.com/imageio/imageio-ffmpeg.
+
+----------------------------------------------------------------------
+macOS package (Video2X Studio.app) third-party components
+----------------------------------------------------------------------
+
+The macOS package bundles the native libraries below (built by Homebrew unless
+noted), Electron and an embedded Python runtime. Inside the package,
+licenses/README.txt lists every bundled library with its version, license and a
+source URL matching that version, and licenses/<component>/ holds its license
+texts (generated at packaging time by scripts/macos/package-app.mjs).
+
+- FFmpeg 7.1.5, built from unmodified source with --enable-gpl: GNU General
+  Public License 2.0 or later.
+- x264, x265, vid.stab: GNU General Public License 2.0 or later.
+- libplacebo: GNU Lesser General Public License 2.1 or later.
+- MoltenVK, Vulkan Loader, SPIRV-Tools, shaderc: Apache License 2.0.
+- glslang: BSD 3-Clause, MIT and Apache License 2.0 (its Bison-generated
+  parser is GPL 3.0 or later with the Bison special exception).
+- LLVM OpenMP runtime (libomp): Apache License 2.0 with LLVM Exceptions.
+- ncnn, libvpx: BSD 3-Clause License. dav1d, libaom: BSD 2-Clause License
+  (libaom is also covered by the Alliance for Open Media Patent License 1.0).
+  libvmaf: BSD-2-Clause-Patent.
+- fmt, spdlog, Little CMS: MIT License. zimg: WTFPL. Boost: Boost Software
+  License 1.0.
+- Real-ESRGAN, Real-CUGAN and RIFE ncnn Vulkan libraries (built from
+  github.com/k4yt3x/lib*-ncnn-vulkan): MIT License.
+
+This product bundles python-build-standalone
+(https://github.com/astral-sh/python-build-standalone), a relocatable build of
+CPython 3.12 (Python Software Foundation License 2.0) that statically links
+OpenSSL (Apache License 2.0), SQLite (public domain), mpdecimal (BSD 2-Clause),
+expat (MIT), libffi (MIT), XZ Utils (0BSD), bzip2 and Tcl/Tk. The license
+texts of these components are published with each python-build-standalone
+release.
+
+The macOS package also carries Electron's LICENSE and Chromium's
+LICENSES.chromium.html in licenses/electron/.

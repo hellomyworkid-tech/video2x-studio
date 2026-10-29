@@ -1,7 +1,7 @@
 # macOS 开发环境搭建
 
-> 目标机器：Apple Silicon、macOS 14 及以上（MPS 的 bf16 需要 14+）。以下命令在 Windows 上整理，
-> **未在 Mac 上实测**，第一次照做时有出入就修正本文并提交。
+> 目标机器：Apple Silicon、macOS 14 及以上（MPS 的 bf16 需要 14+）。以下命令最初在 Windows 上整理，
+> 阶段 0–5 在 Mac 上照做时已按实际情况逐节修正；以后再有出入，修正本文并提交。
 > 一键版：迁移包里的 `restore-on-mac.sh` 负责恢复仓库与权重，`scripts/macos/bootstrap.sh` 负责装依赖。
 
 ## 0. 前置
@@ -188,6 +188,7 @@ npm run dist:mac
    - MoltenVK 的 ICD 清单。
    - 随包 Python：python-build-standalone 3.12.16，核对官方 SHA-256，按 `engine-python/requirements-macos-lock.txt` 安装。首次约 15 分钟，主要是 pip 下载约 1 GB 依赖；之后复用。
    - App 图标。
+   - 第三方许可证与源码清单 `dist-macos/licenses/`，进包后在 `Contents/licenses/`：每个随包库一个子目录放许可证原文，`README.txt` 列出随包文件、版本、许可与同版本的源码地址（Homebrew 库的地址取自 keg 里的配方副本），另附 Electron / Chromium 的许可。GPL 组件分发时要能提供源码，见 COMPLIANCE.md §6。
 2. **check-dist pre：** 关键文件齐全，C++ 产物不旧于源码。
 3. **electron-builder --mac dir：** 按 `package.json` 的 `mac.extraFiles` 拷进 `.app/Contents`，布局与项目根相同。
    - 只带 Mac 用的权重：SeedVR2 fp16、SwiftVR FP8。
