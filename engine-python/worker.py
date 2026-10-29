@@ -458,14 +458,16 @@ def main():
     from vsr_models.realbasicvsr import load_realbasicvsr
 
     use_cuda = str(args.device).startswith('cuda') and torch.cuda.is_available()
+    use_mps = str(args.device).startswith('mps') and torch.backends.mps.is_available()
     # resolve_device 统一补索引：'cuda' → 'cuda:0'（set_device 不接受无索引形式）
-    device = resolve_device(args.device) if use_cuda else 'cpu'
+    device = resolve_device(args.device) if (use_cuda or use_mps) else 'cpu'
     if use_cuda:
         # empty_cache() / autocast('cuda') 等都作用于"当前设备"（默认 0 号卡）：
         # 不调用 set_device，多卡下显存回收与 autocast 上下文全部落错卡
         validate_cuda_device(device)  # 索引越界给中文提示，而非原始 CUDA 报错
         torch.cuda.set_device(device)
-    fp16 = use_cuda and not args.no_fp16
+    fp16 = (use_cuda or use_mps) and not args.no_fp16
+    amp_device = 'cuda' if use_cuda else 'mps' if use_mps else 'cpu'  # autocast 的设备类型
     spynet_p = ENGINE_DIR / 'weights' / 'spynet.pth'
     if not spynet_p.exists():
         # 商用合规构建会移除 spynet.pth（Max Planck 非商业许可）；
@@ -492,9 +494,15 @@ def main():
     # 取舍：长片（一小时级）19% 就是数小时，因此默认走快的分块路径，
     # 需要极致画质时用 --tile 0 换那 1.63 dB。
     # 注意 chunk16 反而比 chunk12 慢——10.2 GB 已进入劣化区，预算须卡在此之前。
+    # MPS 取 PyTorch 在统一内存里可用的上限（recommended_max_memory，worker 已把 MPS 水位卡在
+    # 1.0 倍，超出即 OOM）：M5 Max 36 GB 上为 28.1 GB，按下表与 16 GB 卡落在同一档
     try:
-        vram_gb = (torch.cuda.get_device_properties(device).total_memory / (1 << 30)
-                   if use_cuda else 0.0)
+        if use_cuda:
+            vram_gb = torch.cuda.get_device_properties(device).total_memory / (1 << 30)
+        elif use_mps:
+            vram_gb = torch.mps.recommended_max_memory() / (1 << 30)
+        else:
+            vram_gb = 0.0
     except Exception:
         vram_gb = 0.0
 
@@ -565,7 +573,7 @@ def main():
     def infer(lqs):
         """lqs: (1,T,3,H,W) 0..1 → (1,T,3,4H,4W)；高分辨率自动分块+羽化"""
         if not tiled:
-            with torch.autocast('cuda', dtype=torch.float16, enabled=fp16):
+            with torch.autocast(amp_device, dtype=torch.float16, enabled=fp16):
                 return model(lqs).float()
         T = lqs.shape[1]
         acc = torch.zeros(1, T, 3, OH, OW, dtype=torch.float16, device=device)
@@ -582,7 +590,7 @@ def main():
                 if (y0, x0) in seen:
                     continue
                 seen.add((y0, x0))
-                with torch.autocast('cuda', dtype=torch.float16, enabled=fp16):
+                with torch.autocast(amp_device, dtype=torch.float16, enabled=fp16):
                     # .contiguous()：切片是非连续视图，RealBasicVSR 内部若对输入做
                     # 原地填充/改写会污染 lqs 缓冲，进而影响后续相邻分块
                     o = model(lqs[:, :, :, y0:y1, x0:x1].contiguous()).float()
@@ -598,7 +606,7 @@ def main():
         # 原地相除，避免再产生一块 11GB 级 fp32 副本；写出帧时再转 uint8
         acc.div_(wacc.clamp_min(1e-6))
         del wacc
-        torch.cuda.empty_cache()
+        empty_device_cache(device)
         return acc  # fp16 (1,T,3,OH,OW)
 
     # ------------------------------------------------------------------

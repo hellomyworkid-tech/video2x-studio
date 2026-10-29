@@ -31,7 +31,10 @@ WEIGHTS_DIR = ENGINE_DIR / 'weights' / 'SeedVR2-3B'
 sys.path.insert(0, str(VENDOR_DIR))
 sys.path.insert(0, str(ENGINE_DIR))
 
-from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, codec_tag_args, decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest  # noqa: E402
+from worker import probe, fmt_hms, log, fail, FFMPEG, start_decode_watchdog, pause_requested, resolve_device, validate_cuda_device, quality_args, codec_tag_args, decode_cfr_args, encode_color_args, merge_with_source, sageattn_selftest, empty_device_cache  # noqa: E402
+
+# MPS 不支持 FP8 张量（只能存不能算），Mac 用官方 fp16 版 DiT（D6；资产表按平台下载同一文件）
+DIT_FP16 = 'seedvr2_ema_3b_fp16.safetensors'
 
 
 def compute_output_dims(w0, h0, resolution):
@@ -65,6 +68,8 @@ def pick_attention_mode(device='cuda:0'):
     forced = os.environ.get('V2X_SEEDVR2_ATTN', '').strip().lower()
     if forced in ATTN_MODES:
         return forced, '环境变量指定'
+    if device == 'mps':
+        return 'sdpa', 'Apple GPU（MPS）只有 PyTorch 原生 SDPA'
     try:
         import torch
         from src.optimization import compatibility as compat
@@ -91,7 +96,13 @@ def pick_memory_strategy(device='cuda:0'):
 
     conv3d_wa=True 表示保留 numz 的 cuDNN Conv3d 绕路（省显存但 VAE 慢约 3-5 倍）；
     显存 ≥12GB 时用标准 dispatch（配合 VAE tiling，内存安全且快得多）。
-    device 必须是实际推理用卡：异构多卡下按 0 号卡评估会把大显存卡误判成低显存。"""
+    device 必须是实际推理用卡：异构多卡下按 0 号卡评估会把大显存卡误判成低显存。
+    MPS 固定一档（vendor 在 macOS 上会自动禁用 BlockSwap）。"""
+    if device == 'mps':
+        # 统一内存与系统共用，不按容量分档。M5 Max 36 GB 实测（960p 输出，72 帧）：VAE 编码不分块时
+        # 进程峰值 38 GB、系统换页、369 s；编解码都按 768 分块时峰值 31 GB、327 s，且与 Windows
+        # 参考更接近（39.0 vs 38.7 dB）。峰值主要是 DiT 载入时 CPU 上的 fp16→bf16 转换副本，属瞬时
+        return dict(blocks=0, swap_io=False, enc_tiled=True, dec_tiled=True, tile=768, conv3d_wa=False)
     try:
         import torch
         total_gb = torch.cuda.get_device_properties(device).total_memory / (1 << 30)
@@ -136,10 +147,15 @@ def main(args):
     # 尊重 UI 高级选项的显卡选择（worker.py --device cuda:N）：
     # 显存策略评估、empty_cache 的"当前设备"语义都必须落到这张卡
     dev = resolve_device(args.device)
-    if not dev.startswith('cuda'):
-        fail(f'SeedVR2 需要 CUDA 设备（收到 --device {args.device}）')
-    validate_cuda_device(dev)
-    torch.cuda.set_device(dev)
+    if dev == 'mps':
+        if not torch.backends.mps.is_available():
+            fail('MPS 不可用：需要 Apple Silicon 与 macOS 14 及以上')
+    elif dev.startswith('cuda'):
+        validate_cuda_device(dev)
+        torch.cuda.set_device(dev)
+    else:
+        fail(f'SeedVR2 需要 CUDA 或 MPS 设备（收到 --device {args.device}）')
+    dit_model = DIT_FP16 if dev == 'mps' else DEFAULT_DIT
     mem = pick_memory_strategy(dev)
     if args.tile == 0:                   # --tile 0：VAE 整帧编解码
         mem.update(enc_tiled=False, dec_tiled=False)
@@ -222,7 +238,7 @@ def main(args):
             dit_offload_device='cpu', vae_offload_device=None,
             tensor_offload_device='cpu', debug=debug)
         runner, cache_context = prepare_runner(
-            dit_model=DEFAULT_DIT, vae_model=DEFAULT_VAE,
+            dit_model=dit_model, vae_model=DEFAULT_VAE,
             model_dir=str(WEIGHTS_DIR), debug=debug, ctx=ctx,
             block_swap_config={
                 'blocks_to_swap': blocks,
@@ -372,13 +388,13 @@ def main(args):
                     temporal_overlap=0, batch_size=BATCH)
 
             result = ctx['final_video']
-            if result.is_cuda:
+            if result.device.type != 'cpu':
                 result = result.cpu()
             if result.dtype in (torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2):
                 result = result.to(torch.float32)
             out = (result.clamp_(0, 1) * 255.0).round().to(torch.uint8).numpy()
             del result, frames_tensor
-            torch.cuda.empty_cache()
+            empty_device_cache(dev)
             # 兼容 [C,T,H,W] / [T,C,H,W] / [T,H,W,C] 三种输出布局
             if out.ndim == 4 and out.shape[0] in (1, 3) and out.shape[-1] not in (1, 3):
                 out = np.transpose(out, (1, 2, 3, 0))
@@ -474,8 +490,10 @@ def main(args):
     except OSError:
         pass
     emit_progress()
-    log(f'完成: {args.output}（{written} 帧，输出 {oW}x{oH}，'
-        f'显存峰值 {torch.cuda.max_memory_reserved(dev) / 2**30:.1f} GB）')
+    # MPS 没有峰值统计接口，只在 CUDA 上报显存峰值
+    peak = (f'，显存峰值 {torch.cuda.max_memory_reserved(dev) / 2**30:.1f} GB'
+            if dev.startswith('cuda') else '')
+    log(f'完成: {args.output}（{written} 帧，输出 {oW}x{oH}{peak}）')
 
 
 if __name__ == '__main__':

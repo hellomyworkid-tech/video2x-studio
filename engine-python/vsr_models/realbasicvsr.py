@@ -405,7 +405,7 @@ def load_realbasicvsr(ckpt_path, spynet_path=None, device='cuda', fp16=True,
             print(f'[realbasicvsr] 忽略多余权重键: {len(unexpected)} 个')
 
     model.eval().to(device)
-    if fp16 and device.startswith('cuda'):
+    if fp16 and (device.startswith('cuda') or device == 'mps'):
         model.half()
         # SPyNet keeps fp32 for numerical stability of flow estimation
         model.basicvsr.spynet.float()
